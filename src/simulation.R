@@ -1,15 +1,30 @@
-###########
-# Simulate true sensitivity as a function of sojourn time
-# Author: Yibai Zhao
-###########
-library(dplyr)
-library(ggplot2)
-library(here)
+##################################################
+# Evaluate bias in estimates of a cancer screening
+# test obtained in a retrospective setting compared
+# to estimates obtained in a prospective setting.
+# Basic setup:
+# 1. Simulate a population of healthy persons at age 40 years
+# 2. Simulate onset (eg, exponential with mean 10 years)
+# 3. Specify fraction non-progressive (eg, 0%, 20%, 40%)
+# 4. Simulate clinical diagnosis (eg, exponential with mean 2, 5, 10 years)
+# 5. Specify a test with sensitivity that increases over sojourn time
+#    (e.g., linear from 20% at onset to 80% at clinical diagnosis)
+# 6. Simulate one-time screening tests (eg, at ages 50, 60, 70 years)
+# 7. Calculate test sensitivity in each prospective screening setting
+# Main analyses:
+# 1. Confirm that sensitivity estimated in retrospective setting is "correct"
+# 2. Confirm that sensitivity estimated in prospective setting is "correct"
+# 3. Visualize sensitivity estimated in prospective settings:
+#       3a. How does bias depend on testing age (0% non-progressive)?
+#       3b. How does bias depend on mean sojourn time (0% non-progressive)?
+#       3c. How does bias depend on fraction that are non-progressive?
+##################################################
+library(tidyverse)
 library(purrrlyr)
-library(stringr)
-library(tidyr)
+library(here)
 library(foreach)
 library(doParallel)
+
 ##################
 # U: time to preclinical onset, U~f(u)
 # Y: sojourn time from preclinical to clinical, Y~g(y)
