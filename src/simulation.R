@@ -78,10 +78,10 @@ obs_sensF <- function(N,
     rbinom(1, 1, prob=row$c_sens_true)
   }, .collate="rows", .to="c_results")
   # calculate mean true sensitivity and observed sensitivity at test age
-  dset_out <- data.frame(pre_sens_true=mean(dset$pre_sens_true, na.rm=T),
-                         pre_sens_obs=mean(dset$pre_results, na.rm=T),
-                         c_sens_true=mean(dset2$c_sens_true, na.rm=T),
-                         c_sens_obs=mean(dset2$c_results, na.rm=T))
+  dset_out <- data.frame(pre_sens_true=mean(dset$pre_sens_true, na.rm=TRUE),
+                         pre_sens_obs=mean(dset$pre_results, na.rm=TRUE),
+                         c_sens_true=mean(dset2$c_sens_true, na.rm=TRUE),
+                         c_sens_obs=mean(dset2$c_results, na.rm=TRUE))
   dset_out$pre_sens_obs_indolent <- dset_out$pre_sens_obs*indolent_rate
   dset_out$pre_sens_obs_progressive <- dset_out$pre_sens_obs*(1-indolent_rate)
   return(dset_out)
@@ -136,7 +136,7 @@ outF <- function(B,
                  alpha,
                  beta_t=NULL,
                  beta_st=NULL,
-                 saveit){
+                 saveit=FALSE){
   dset_seq <- expand.grid(test_age_seq, mst_seq, indolent_rate_seq)
   names(dset_seq) <- c("test_age", "mst", "indolent_rate")
   dset_seq <- dset_seq %>% by_row(function(row){
@@ -186,7 +186,7 @@ plot_sens <- function(t_seq,
                       alpha,
                       beta_t=NULL,
                       beta_st=NULL,
-                      saveit){
+                      saveit=FALSE){
   if(is.null(st_seq) & is.null(beta_st)){
     dset_seq <- data.frame(t=t_seq,
                            sens=sens_timeF(t=t_seq,
@@ -228,7 +228,7 @@ generate_tb <- function(N,
                         test_time_seq,
                         beta_t=NULL,
                         beta_st=NULL,
-                        saveit){
+                        saveit=FALSE){
   # estimate observed sensitivity
   out_sens <- sapply(mean_st_seq,
                      function(s) {sapply(test_time_seq,
@@ -240,7 +240,7 @@ generate_tb <- function(N,
                                                beta_st=beta_st)})})
   out <- data.frame(test_time=test_time_seq, out_sens)
   names(out)[2:(length(mean_st_seq)+1)] <- paste0("mean_st=", mean_st_seq)
-  out <- rbind(out, colMeans(out, na.rm=T))
+  out <- rbind(out, colMeans(out, na.rm=TRUE))
   if(saveit){
     filname <- str_glue('tbl_sens_{datestamp}.csv')
     write.csv(out, here("tables", filname))
@@ -262,7 +262,7 @@ control <- function(N,
                     test_age_seq,
                     alpha=-2.3858,
                     beta_st=3.7721,
-                    saveit){
+                    saveit=FALSE){
   set.seed(234)
 
   #############################
@@ -297,5 +297,5 @@ control(N=1000,
         test_age_seq=seq(50, 70, by=10),
         alpha=-2.3858,
         beta_st=3.7721,
-        saveit=T)
+        saveit=TRUE)
 
