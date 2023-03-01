@@ -1,2 +1,2 @@
 # time-dependent-sensitivity
-Modeling time dependent sensitivity on AS
+Characterize bias from estimating screening test sensitivity in a retrospective vs prospective setting
