@@ -149,7 +149,10 @@ prospective_test_sensitivity <- function(N=1000,
 # ext: figure filename extension
 # saveit: logical indicator of whether to save plot
 ##################################################
-plot_sensitivity <- function(dset, clinical_sensitivity, ext='png', saveit=FALSE){
+plot_prospective_sensitivity <- function(dset,
+                                         clinical_sensitivity,
+                                         ext='png',
+                                         saveit=FALSE){
   varname <- names(dset)[1]
   varlabel <- switch(varname,
                      test_age='Age at screening test (years)',
@@ -161,11 +164,13 @@ plot_sensitivity <- function(dset, clinical_sensitivity, ext='png', saveit=FALSE
   gg <- ggplot(dset)
   gg <- gg+geom_hline(aes(yintercept=clinical_sensitivity), linetype='dashed')
   gg <- gg+geom_boxplot(aes_string(x=varname, y='prosp_sens'),
+                        fill='gray',
                         width=1/2,
                         position=position_dodge(width=0.4))
   gg <- gg+scale_x_discrete(name=varlabel)
   gg <- gg+scale_y_continuous(name='Test sensitivity',
                               limits=c(0, 1),
+                              breaks=seq(0, 1, by=0.2),
                               labels=label_percent(accuracy=1),
                               expand=c(0, 0))
   print(gg)
@@ -173,15 +178,15 @@ plot_sensitivity <- function(dset, clinical_sensitivity, ext='png', saveit=FALSE
     filname <- str_glue('{varname}_{datestamp}.{ext}')
     ggsave(here("plot", filname),
            gg,
-           width=8,
-           height=6)
+           width=5,
+           height=5)
   }
 }
 
 ##################################################
 # Control analysis
 ##################################################
-control <- function(N=1000,
+control <- function(N=10000,
                     preonset_rate=0.1,
                     mean_sojourn_time=c(2, 5, 10),
                     indolent_rate=c(0, 0.2, 0.4),
@@ -214,17 +219,26 @@ control <- function(N=1000,
   dset_test_age <- dset %>% slice_min(mean_sojourn_time)
   dset_test_age <- dset_test_age %>% slice_min(indolent_rate)
   dset_test_age <- dset_test_age %>% select(-mean_sojourn_time, -indolent_rate)
-  plot_sensitivity(dset_test_age, clinical_sensitivity, ext=ext, saveit=saveit)
+  plot_prospective_sensitivity(dset_test_age,
+                               clinical_sensitivity,
+                               ext=ext,
+                               saveit=saveit)
   # how does bias depend on mean sojourn time (0% non-progressive, age 50)?
   dset_sojourn_time <- dset %>% slice_min(test_age)
   dset_sojourn_time <- dset_sojourn_time %>% slice_min(indolent_rate)
   dset_sojourn_time <- dset_sojourn_time %>% select(-test_age, -sojourn_time)
-  plot_sensitivity(dset_sojourn_time, clinical_sensitivity, ext=ext, saveit=saveit)
+  plot_prospective_sensitivity(dset_sojourn_time,
+                               clinical_sensitivity,
+                               ext=ext,
+                               saveit=saveit)
   # how does bias depend on fraction that are non-progressive (mst 2, age 50)?
   dset_indolent_rate <- dset %>% slice_min(test_age)
   dset_indolent_rate <- dset_indolent_rate %>% slice_min(mean_sojourn_time)
   dset_indolent_rate <- dset_indolent_rate %>% select(-test_age, -mean_sojourn_time)
-  plot_sensitivity(dset_indolent_rate, clinical_sensitivity, ext=ext, saveit=saveit)
+  plot_prospective_sensitivity(dset_indolent_rate,
+                               clinical_sensitivity,
+                               ext=ext,
+                               saveit=saveit)
 }
 control(saveit=TRUE)
 
