@@ -94,19 +94,27 @@ plot_test_sensitivity <- function(sojourn_time,
 }
 
 ##################################################
-# U: time to preclinical onset, U~f(u)
-# Y: sojourn time from preclinical to clinical, Y~g(y)
-# S: sensitivity depending on sojourn time, S~h(y)
-# test_time: test time
+# Simulate natural histories and determine sensitivity
+# of a test at the specified age that would be estimated
+# in a prospective setting among persons with preclinical
+# cancer
+# N: number of simulated individuals
+# start_age: initial age at start of simulation
+# preonset_rate: exponential rate of cancer onset
+# mean_sojourn_time: exponential mean sojourn time
+# indolent_rate: proportion of non-progressive cancers
+# test_age: age at one-time screening test
+# onset_sensitivity: test sensitivity at onset
+# clinical_sensitivity: test sensitivity at clinical diagnosis
 ##################################################
-obs_sensF <- function(N=1000,
-                      start_age=40,
-                      preonset_rate=0.1,
-                      mean_sojourn_time=2,
-                      indolent_rate=0,
-                      test_age=50,
-                      onset_sensitivity=0.2,
-                      clinical_sensitivity=0.8){
+prospective_test_sensitivity <- function(N=1000,
+                                         start_age=40,
+                                         preonset_rate=0.1,
+                                         mean_sojourn_time=2,
+                                         indolent_rate=0,
+                                         test_age=50,
+                                         onset_sensitivity=0.2,
+                                         clinical_sensitivity=0.8){
   # simulate ages at preclinical onset and clinical diagnosis
   dset <- tibble(onset_age=start_age+rexp(N, rate=preonset_rate),
                  sojourn_time=rexp(N, rate=1/mean_sojourn_time),
@@ -118,142 +126,62 @@ obs_sensF <- function(N=1000,
                                                       onset_sensitivity,
                                                       clinical_sensitivity,
                                                       time=sojourn_time)$sensitivity)
-  stopifnot(with(cset, all(retro_sens == clinical_sensitivity)))
+  ccheck <- cset %>% with(all(retro_sens == clinical_sensitivity))
+  ccheck %>% stopifnot()
   # calculate true prospective test sensitivity among preclinical at test age
   pset <- dset %>% filter(onset_age <= test_age & test_age < clinical_age)
   pset <- pset %>% mutate(prosp_sens=test_sensitivity(sojourn_time=sojourn_time,
                                                       onset_sensitivity,
                                                       clinical_sensitivity,
                                                       time=test_age-onset_age)$sensitivity)
-  stopifnot(with(pset, all(between(prosp_sens, onset_sensitivity, clinical_sensitivity))))
-  browser()
-  # get imperfect test results based on preclinical sensitivity
-  dset <- dset %>% by_row(function(row){
-                            rbinom(1, 1, prob=row$pre_sens_true)
-                      }, .collate="rows", .to="pre_results")
-  # get imperfect test results at clinical diagnosed time
-  dset2 <- dset2 %>% by_row(function(row){
-                              rbinom(1, 1, prob=row$c_sens_true)
-                      }, .collate="rows", .to="c_results")
-  # calculate mean true sensitivity and observed sensitivity at test age
-  dset_out <- data.frame(pre_sens_true=mean(dset$pre_sens_true, na.rm=TRUE),
-                         pre_sens_obs=mean(dset$pre_results, na.rm=TRUE),
-                         c_sens_true=mean(dset2$c_sens_true, na.rm=TRUE),
-                         c_sens_obs=mean(dset2$c_results, na.rm=TRUE))
-  dset_out$pre_sens_obs_indolent <- dset_out$pre_sens_obs*indolent_rate
-  dset_out$pre_sens_obs_progressive <- dset_out$pre_sens_obs*(1-indolent_rate)
-  return(dset_out)
+  pcheck <- pset %>% filter(indolent == 0)
+  pcheck <- pcheck %>% with(all(between(prosp_sens,
+                                        onset_sensitivity,
+                                        clinical_sensitivity)))
+  pcheck %>% stopifnot()
+  return(list(pset))
 }
 
-replicate_sensF <- function(B,
-                            N,
-                            start_age,
-                            mean_preonset_rate,
-                            mst,
-                            test_age,
-                            indolent_rate=0,
-                            alpha,
-                            beta_t=NULL,
-                            beta_st=NULL){
-  registerDoParallel(8)
-  foreach (i=1:B, .combine=rbind) %dopar% {
-    obs_sensF(N=N,
-              start_age=start_age,
-              mean_preonset_rate=mean_preonset_rate,
-              mst=mst,
-              test_age=test_age,
-              indolent_rate=indolent_rate,
-              alpha=alpha,
-              beta_t=beta_t,
-              beta_st=beta_st)
-  }
-}
-
-outF <- function(B,
-                 N,
-                 start_age,
-                 mean_preonset_rate,
-                 mst_seq,
-                 test_age_seq,
-                 indolent_rate_seq,
-                 alpha,
-                 beta_t=NULL,
-                 beta_st=NULL,
-                 saveit=FALSE){
-  dset_seq <- expand.grid(test_age_seq, mst_seq, indolent_rate_seq)
-  names(dset_seq) <- c("test_age", "mst", "indolent_rate")
-  dset_seq <- dset_seq %>% by_row(function(row){
-                                    replicate_sensF(B,
-                                                    N,
-                                                    start_age,
-                                                    mean_preonset_rate,
-                                                    mst=row$mst,
-                                                    test_age=row$test_age,
-                                                    indolent_rate=row$indolent_rate,
-                                                    alpha,
-                                                    beta_t,
-                                                    beta_st)
-                 }, .collate="row")
-
-  dset_seq <- dset_seq %>% pivot_longer(cols=contains("sens"),
-                                        names_to="Type",
-                                        values_to="Sensitivity")
-  # figure
-  labs <- paste0("mst=", mst_seq)
-  names(labs) <- mst_seq
-  gg_sens <- dset_seq %>%
-    ggplot(aes(x=factor(test_age), y=Sensitivity, color=Type)) +
-    geom_boxplot(width=1/2, position=position_dodge(width=0.4)) +
-    facet_wrap(~mst, ncol=2, labeller=labeller(mst=labs)) +
-    xlab("Age at test") +
-    scale_color_discrete(name="Sensitivity Type",
-                         breaks=unique(dset_seq$Type),
-                         labels=c("preclinical true",
-                                  "preclinical obs",
-                                  "clinical true",
-                                  "clinical obs",
-                                  "preclinical obs indolent",
-                                  "preclinical obs progressive"))
-    print(gg_sens)
-    if(saveit){
-      filname <- str_glue('fig_sens_all_{datestamp}.png')
-      ggsave(here("plot", filname),
-             gg_sens,
-             width=8,
-             height=6)
-    }
-}
-
-generate_tb <- function(N,
-                        mean_st_seq,
-                        test_time_seq,
-                        beta_t=NULL,
-                        beta_st=NULL,
-                        saveit=FALSE){
-  # estimate observed sensitivity
-  out_sens <- sapply(mean_st_seq,
-                     function(s) {sapply(test_time_seq,
-                                         function(t){obs_sensF(N=N,
-                                                               mean_preonset_rate=mean_preonset_rate,
-                                                               mean_st=s,
-                                                               test_time=t,
-                                                               beta_t=beta_t,
-                                                               beta_st=beta_st)})})
-  out <- data.frame(test_time=test_time_seq, out_sens)
-  names(out)[2:(length(mean_st_seq)+1)] <- paste0("mean_st=", mean_st_seq)
-  out <- rbind(out, colMeans(out, na.rm=TRUE))
+##################################################
+# Visualize bias in true sensitivity obtained in
+# retrospective vs prospective screening settings
+# dset: tibble of prospective screening settings
+# ext: figure filename extension
+# saveit: logical indicator of whether to save plot
+##################################################
+plot_sensitivity <- function(dset, clinical_sensitivity, ext='png', saveit=FALSE){
+  varname <- names(dset)[1]
+  varlabel <- switch(varname,
+                     test_age='Age at screening test (years)',
+                     mean_sojourn_time='Mean sojourn time (years)',
+                     indolent_rate='Proportion non-progressive')
+  dset <- dset %>% mutate(!!sym(varname):=factor(!!sym(varname)))
+  theme_set(theme_classic())
+  theme_update(axis.ticks.length=unit(0.2, 'cm'))
+  gg <- ggplot(dset)
+  gg <- gg+geom_hline(aes(yintercept=clinical_sensitivity), linetype='dashed')
+  gg <- gg+geom_boxplot(aes_string(x=varname, y='prosp_sens'),
+                        width=1/2,
+                        position=position_dodge(width=0.4))
+  gg <- gg+scale_x_discrete(name=varlabel)
+  gg <- gg+scale_y_continuous(name='Test sensitivity',
+                              limits=c(0, 1),
+                              labels=label_percent(accuracy=1),
+                              expand=c(0, 0))
+  print(gg)
   if(saveit){
-    filname <- str_glue('tbl_sens_{datestamp}.csv')
-    write.csv(out, here("tables", filname))
+    filname <- str_glue('{varname}_{datestamp}.{ext}')
+    ggsave(here("plot", filname),
+           gg,
+           width=8,
+           height=6)
   }
-  return(out)
 }
 
 ##################################################
 # Control analysis
 ##################################################
 control <- function(N=1000,
-                    B=10000,
                     preonset_rate=0.1,
                     mean_sojourn_time=c(2, 5, 10),
                     indolent_rate=c(0, 0.2, 0.4),
@@ -272,59 +200,31 @@ control <- function(N=1000,
   # simulate natural histories
   dset <- expand_grid(test_age, mean_sojourn_time, indolent_rate)
   dset <- dset %>% group_by(test_age, mean_sojourn_time, indolent_rate)
-  dset <- dset %>% mutate(results=obs_sensF(N=N,
-                                            start_age,
-                                            preonset_rate,
-                                            mean_sojourn_time,
-                                            indolent_rate,
-                                            test_age,
-                                            onset_sensitivity,
-                                            clinical_sensitivity))
-  browser()
-  dset <- dset %>% by_row(function(row){
-                                    replicate_sensF(B,
-                                                    N,
-                                                    start_age,
-                                                    mean_preonset_rate,
-                                                    mst=row$mst,
-                                                    test_age=row$test_age,
-                                                    indolent_rate=row$indolent_rate,
-                                                    alpha,
-                                                    beta_t,
-                                                    beta_st)
-                 }, .collate="row")
-  sset <- sset %>% mutate(sensitivity=map(mean_sojourn_time,
-                                          test_sensitivity,
-                                          onset_sensitivity,
-                                          clinical_sensitivity))
-  sset <- sset %>% unnest(sensitivity)
+  dset <- dset %>% mutate(results=prospective_test_sensitivity(N=N,
+                                                               start_age,
+                                                               preonset_rate,
+                                                               mean_sojourn_time,
+                                                               indolent_rate,
+                                                               test_age,
+                                                               onset_sensitivity,
+                                                               clinical_sensitivity))
+  dset <- dset %>% unnest(results)
+  dset <- dset %>% ungroup()
   # how does bias depend on testing age (mst 2, 0% non-progressive)?
-  plot_sensitivity(test_age=test_age,
-                   mean_sojourn_time=min(mean_sojourn_time),
-                   indolent_rate=min(indolent_rate),
-                   saveit=saveit)
+  dset_test_age <- dset %>% slice_min(mean_sojourn_time)
+  dset_test_age <- dset_test_age %>% slice_min(indolent_rate)
+  dset_test_age <- dset_test_age %>% select(-mean_sojourn_time, -indolent_rate)
+  plot_sensitivity(dset_test_age, clinical_sensitivity, ext=ext, saveit=saveit)
   # how does bias depend on mean sojourn time (0% non-progressive, age 50)?
-  plot_sensitivity(test_age=min(test_age),
-                   mean_sojourn_time=mean_sojourn_time,
-                   indolent_rate=min(indolent_rate),
-                   saveit=saveit)
+  dset_sojourn_time <- dset %>% slice_min(test_age)
+  dset_sojourn_time <- dset_sojourn_time %>% slice_min(indolent_rate)
+  dset_sojourn_time <- dset_sojourn_time %>% select(-test_age, -sojourn_time)
+  plot_sensitivity(dset_sojourn_time, clinical_sensitivity, ext=ext, saveit=saveit)
   # how does bias depend on fraction that are non-progressive (mst 2, age 50)?
-  plot_sensitivity(test_age=min(test_age),
-                   mean_sojourn_time=min(mean_sojourn_time),
-                   indolent_rate=indolent_rate,
-                   saveit=saveit)
-  # compare between preclinical and clinical sensitivity under indolent cases
-  outF(B=B,
-       N=1000,
-       start_age=start_age,
-       mean_preonset_rate=mean_preonset_rate,
-       mst_seq=mst_seq,
-       test_age_seq=test_age_seq,
-       indolent_rate_seq=indolent_rate_seq,
-       alpha=alpha,
-       beta_t=NULL,
-       beta_st=beta_st,
-       saveit=saveit)
+  dset_indolent_rate <- dset %>% slice_min(test_age)
+  dset_indolent_rate <- dset_indolent_rate %>% slice_min(mean_sojourn_time)
+  dset_indolent_rate <- dset_indolent_rate %>% select(-test_age, -mean_sojourn_time)
+  plot_sensitivity(dset_indolent_rate, clinical_sensitivity, ext=ext, saveit=saveit)
 }
 control(saveit=TRUE)
 
