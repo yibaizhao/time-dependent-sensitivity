@@ -39,6 +39,8 @@ library(doParallel)
 #datestamp <- "2023-02-27"
 datestamp <- "2023-03-01"
 
+set.seed(1234)
+
 ##################################################
 # Prospective sensitivity evaluated at specified times
 # sojourn_time: sojourn time in years
@@ -97,33 +99,34 @@ plot_test_sensitivity <- function(sojourn_time,
 # S: sensitivity depending on sojourn time, S~h(y)
 # test_time: test time
 ##################################################
-obs_sensF <- function(N,
-                      start_age,
-                      mean_preonset_rate,
-                      mst,
+obs_sensF <- function(N=1000,
+                      start_age=40,
+                      preonset_rate=0.1,
+                      mean_sojourn_time=2,
                       indolent_rate=0,
-                      test_age=NULL,
-                      alpha,
-                      beta_t=NULL,
-                      beta_st=NULL){
-  # generate individual preclinical onset
-  U <- start_age + rexp(N, rate=mean_preonset_rate)
-  # generate indicator for indolent cancer
-  w <- rbinom(N, 1, indolent_rate)
-  # sojourn time
-  Y <- rexp(N, rate=1/mst)
-  # clinical diagnosed time
-  U_Y <- U+Y
-  # clinical diagnosed time set to Inf if w=1
-  U_Y[w==1] <- Inf
-  dset0 <- data.frame(ID=1:N, U, Y, U_Y)
-  # get cohorts having preclinical onset but not clinical onset
-  dset1 <- dset0 %>% filter(U<=test_age & test_age<U_Y)
-  # calculate true sensitivity
-  ## preclinical sensitivity
-  dset <- dset1 %>% mutate(pre_sens_true=sens_timeF(t=test_age-U, st=Y, alpha=alpha, beta_st=beta_st))
-  ## clinical sensitivity
-  dset2 <- dset0 %>% mutate(c_sens_true=sens_timeF(t=Y, st=Y, alpha=alpha, beta_st=beta_st))
+                      test_age=50,
+                      onset_sensitivity=0.2,
+                      clinical_sensitivity=0.8){
+  # simulate ages at preclinical onset and clinical diagnosis
+  dset <- tibble(onset_age=start_age+rexp(N, rate=preonset_rate),
+                 sojourn_time=rexp(N, rate=1/mean_sojourn_time),
+                 indolent=rbinom(N, 1, indolent_rate),
+                 clinical_age=ifelse(indolent, Inf, onset_age+sojourn_time))
+  # confirm retrospective test sensitivity at clinical diagnosis
+  cset <- dset %>% filter(is.finite(clinical_age))
+  cset <- cset %>% mutate(retro_sens=test_sensitivity(sojourn_time=sojourn_time,
+                                                      onset_sensitivity,
+                                                      clinical_sensitivity,
+                                                      time=sojourn_time)$sensitivity)
+  stopifnot(with(cset, all(retro_sens == clinical_sensitivity)))
+  # calculate true prospective test sensitivity among preclinical at test age
+  pset <- dset %>% filter(onset_age <= test_age & test_age < clinical_age)
+  pset <- pset %>% mutate(prosp_sens=test_sensitivity(sojourn_time=sojourn_time,
+                                                      onset_sensitivity,
+                                                      clinical_sensitivity,
+                                                      time=test_age-onset_age)$sensitivity)
+  stopifnot(with(pset, all(between(prosp_sens, onset_sensitivity, clinical_sensitivity))))
+  browser()
   # get imperfect test results based on preclinical sensitivity
   dset <- dset %>% by_row(function(row){
                             rbinom(1, 1, prob=row$pre_sens_true)
@@ -251,7 +254,7 @@ generate_tb <- function(N,
 ##################################################
 control <- function(N=1000,
                     B=10000,
-                    mean_preonset_rate=0.1,
+                    preonset_rate=0.1,
                     mean_sojourn_time=c(2, 5, 10),
                     indolent_rate=c(0, 0.2, 0.4),
                     start_age=40,
@@ -260,7 +263,6 @@ control <- function(N=1000,
                     clinical_sensitivity=0.8,
                     ext='png',
                     saveit=FALSE){
-  set.seed(234)
   # visualize how test sensitivity increases over sojourn time
   plot_test_sensitivity(sojourn_time=seq(2, 20, by=2),
                         onset_sensitivity,
@@ -269,7 +271,16 @@ control <- function(N=1000,
                         saveit=saveit)
   # simulate natural histories
   dset <- expand_grid(test_age, mean_sojourn_time, indolent_rate)
-  stop()
+  dset <- dset %>% group_by(test_age, mean_sojourn_time, indolent_rate)
+  dset <- dset %>% mutate(results=obs_sensF(N=N,
+                                            start_age,
+                                            preonset_rate,
+                                            mean_sojourn_time,
+                                            indolent_rate,
+                                            test_age,
+                                            onset_sensitivity,
+                                            clinical_sensitivity))
+  browser()
   dset <- dset %>% by_row(function(row){
                                     replicate_sensF(B,
                                                     N,
