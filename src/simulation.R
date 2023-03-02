@@ -8,7 +8,7 @@
 # 3. Specify fraction non-progressive (eg, 0%, 20%, 40%)
 # 4. Simulate clinical diagnosis (eg, exponential with mean 2, 5, 10 years)
 # 5. Specify a test with sensitivity that increases over sojourn time
-#    (e.g., linear from 20% at onset to 80% at clinical diagnosis)
+#    (e.g., logarithmic from 20% at onset to 80% at clinical diagnosis)
 # 6. Simulate one-time screening tests (eg, at ages 50, 60, 70 years)
 # 7. Calculate test sensitivity in each prospective screening setting
 # Main analyses:
@@ -21,6 +21,8 @@
 ##################################################
 library(tidyverse)
 library(purrrlyr)
+library(viridis)
+library(scales)
 library(here)
 library(foreach)
 library(doParallel)
@@ -34,7 +36,60 @@ library(doParallel)
 # datestamp <- "2023-02-08"
 # datestamp <- "2023-02-09"
 # datestamp <- "2023-02-21"
-datestamp <- "2023-02-27"
+#datestamp <- "2023-02-27"
+datestamp <- "2023-03-01"
+
+##################################################
+# Prospective sensitivity evaluated at specified times
+# sojourn_time: sojourn time in years
+# onset_sensitivity: test sensitivity at onset
+# clinical_sensitivity: test sensitivity at clinical diagnosis
+##################################################
+test_sensitivity <- function(sojourn_time,
+                             onset_sensitivity,
+                             clinical_sensitivity,
+                             alpha=log(1/onset_sensitivity-1),
+                             beta=1/sojourn_time*(log(1/clinical_sensitivity-1)-alpha),
+                             time=seq(0, 20)){
+  return(tibble(time=time, sensitivity=1/(1+exp(alpha+beta*time))))
+}
+
+plot_test_sensitivity <- function(sojourn_time,
+                                  onset_sensitivity,
+                                  clinical_sensitivity,
+                                  ext='png',
+                                  saveit=FALSE){
+  sset <- tibble(sojourn_time)
+  sset <- sset %>% mutate(sensitivity=map(sojourn_time,
+                                          test_sensitivity,
+                                          onset_sensitivity,
+                                          clinical_sensitivity))
+  sset <- sset %>% unnest(sensitivity)
+  theme_set(theme_classic())
+  theme_update(axis.ticks.length=unit(0.2, 'cm'))
+  gg <- ggplot(sset)
+  gg <- gg+geom_hline(aes(yintercept=onset_sensitivity), linetype='dashed')
+  gg <- gg+geom_hline(aes(yintercept=clinical_sensitivity), linetype='dashed')
+  gg <- gg+geom_line(aes(x=time,
+                         y=sensitivity,
+                         group=sojourn_time,
+                         colour=sojourn_time))
+  gg <- gg+scale_x_continuous(name='Years since onset',
+                              limits=c(0, max(sojourn_time)),
+                              breaks=c(0, sojourn_time),
+                              expand=c(0, 0))
+  gg <- gg+scale_y_continuous(name='Test sensitivity',
+                              limits=c(0, 1),
+                              breaks=seq(0, 1, by=0.2),
+                              labels=label_percent(accuracy=1),
+                              expand=c(0, 0))
+  gg <- gg+scale_colour_viridis(name='Sojourn\ntime')
+  print(gg)
+  if(saveit){
+    filname <- str_glue('fig_sens_{datestamp}.{ext}')
+    ggsave(here("plot", filname), gg)
+  }
+}
 
 ##################################################
 # U: time to preclinical onset, U~f(u)
@@ -85,21 +140,6 @@ obs_sensF <- function(N,
   dset_out$pre_sens_obs_indolent <- dset_out$pre_sens_obs*indolent_rate
   dset_out$pre_sens_obs_progressive <- dset_out$pre_sens_obs*(1-indolent_rate)
   return(dset_out)
-}
-
-##################
-# Function of time dependent sensitivity
-# exp(a+bx)/(1+exp(a+bx))
-## st: sojourn time, time from preclicnial to clinical
-##################
-sens_timeF <- function(t,
-                       st=NULL,
-                       alpha,
-                       beta_t=NULL,
-                       beta_st=NULL){
-  if(!is.null(beta_st)){
-    return(1/(1+exp(-(alpha+(beta_st/st)*t))))
-  }
 }
 
 replicate_sensF <- function(B,
@@ -181,48 +221,6 @@ outF <- function(B,
     }
 }
 
-plot_sens <- function(t_seq,
-                      st_seq=NULL,
-                      alpha,
-                      beta_t=NULL,
-                      beta_st=NULL,
-                      saveit=FALSE){
-  if(is.null(st_seq) & is.null(beta_st)){
-    dset_seq <- data.frame(t=t_seq,
-                           sens=sens_timeF(t=t_seq,
-                                           alpha=alpha,
-                                           beta_t=beta_t))
-    gg_sens <- dset_seq %>%
-      ggplot(aes(x=t, y=sens)) +
-      geom_line() +
-      ylim(0, 1) +
-      labs(x="Test time (in years)",
-           y="Sensitivity")
-  } else {
-    dset_seq <- expand.grid(t_seq, st_seq)
-    names(dset_seq) <- c("t", "st")
-    dset_seq <- dset_seq %>% by_row(function(row){
-                                      sens_timeF(t=row$t,
-                                                 st=row$st,
-                                                 alpha=alpha,
-                                                 beta_t=beta_t,
-                                                 beta_st=beta_st)
-           }, .collate="rows", .to="sens")
-    gg_sens <- dset_seq %>%
-      ggplot(aes(x=t, y=sens, color=st, group=st)) +
-      geom_line() +
-      ylim(0, 1) +
-      labs(x="Test time (in years)",
-           y="Sensitivity",
-           color='Sojourn time')
-  }
-  print(gg_sens)
-  if(saveit){
-    filname <- str_glue('fig_sens_{datestamp}.png')
-    ggsave(here("plot", filname), gg_sens)
-  }
-}
-
 generate_tb <- function(N,
                         mean_st_seq,
                         test_time_seq,
@@ -250,28 +248,60 @@ generate_tb <- function(N,
 
 ##################################################
 # Control analysis
-# Note: method argument controls biomarker estimation
 ##################################################
 control <- function(N=1000,
                     B=10000,
                     mean_preonset_rate=0.1,
-                    mean_st=1/0.16,
-                    mst_seq=c(2, 5, 10),
-                    indolent_rate_seq=c(0, 0.2, 0.4),
+                    mean_sojourn_time=c(2, 5, 10),
+                    indolent_rate=c(0, 0.2, 0.4),
                     start_age=40,
-                    test_age_seq=seq(50, 70, by=10),
-                    alpha=-2.3858,
-                    beta_st=3.7721,
+                    test_age=seq(50, 70, by=10),
+                    onset_sensitivity=0.2,
+                    clinical_sensitivity=0.8,
+                    ext='png',
                     saveit=FALSE){
   set.seed(234)
-  # how does bias depend on testing age (0% non-progressive)?
-  # how does bias depend on mean sojourn time (0% non-progressive)?
-  # how does bias depend on fraction that are non-progressive?
-  plot_sens(t_seq=seq(0, 30, 1),
-            st_seq=seq(2, 10, 2),
-            alpha=alpha,
-            beta_st=beta_st,
-            saveit=saveit)
+  # visualize how test sensitivity increases over sojourn time
+  plot_test_sensitivity(sojourn_time=seq(2, 20, by=2),
+                        onset_sensitivity,
+                        clinical_sensitivity,
+                        ext=ext,
+                        saveit=saveit)
+  # simulate natural histories
+  dset <- expand_grid(test_age, mean_sojourn_time, indolent_rate)
+  stop()
+  dset <- dset %>% by_row(function(row){
+                                    replicate_sensF(B,
+                                                    N,
+                                                    start_age,
+                                                    mean_preonset_rate,
+                                                    mst=row$mst,
+                                                    test_age=row$test_age,
+                                                    indolent_rate=row$indolent_rate,
+                                                    alpha,
+                                                    beta_t,
+                                                    beta_st)
+                 }, .collate="row")
+  sset <- sset %>% mutate(sensitivity=map(mean_sojourn_time,
+                                          test_sensitivity,
+                                          onset_sensitivity,
+                                          clinical_sensitivity))
+  sset <- sset %>% unnest(sensitivity)
+  # how does bias depend on testing age (mst 2, 0% non-progressive)?
+  plot_sensitivity(test_age=test_age,
+                   mean_sojourn_time=min(mean_sojourn_time),
+                   indolent_rate=min(indolent_rate),
+                   saveit=saveit)
+  # how does bias depend on mean sojourn time (0% non-progressive, age 50)?
+  plot_sensitivity(test_age=min(test_age),
+                   mean_sojourn_time=mean_sojourn_time,
+                   indolent_rate=min(indolent_rate),
+                   saveit=saveit)
+  # how does bias depend on fraction that are non-progressive (mst 2, age 50)?
+  plot_sensitivity(test_age=min(test_age),
+                   mean_sojourn_time=min(mean_sojourn_time),
+                   indolent_rate=indolent_rate,
+                   saveit=saveit)
   # compare between preclinical and clinical sensitivity under indolent cases
   outF(B=B,
        N=1000,
