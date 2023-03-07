@@ -36,8 +36,9 @@ library(doParallel)
 # datestamp <- "2023-02-08"
 # datestamp <- "2023-02-09"
 # datestamp <- "2023-02-21"
-#datestamp <- "2023-02-27"
-datestamp <- "2023-03-01"
+# datestamp <- "2023-02-27"
+# datestamp <- "2023-03-01"
+datestamp <- "2023-03-06"
 
 set.seed(1234)
 
@@ -50,10 +51,14 @@ set.seed(1234)
 test_sensitivity <- function(sojourn_time,
                              onset_sensitivity,
                              clinical_sensitivity,
-                             alpha=log(1/onset_sensitivity-1),
-                             beta=1/sojourn_time*(log(1/clinical_sensitivity-1)-alpha),
                              time=seq(0, 20)){
-  return(tibble(time=time, sensitivity=1/(1+exp(alpha+beta*time))))
+  alpha=log(1/onset_sensitivity-1)
+  beta=1/sojourn_time*(log(1/clinical_sensitivity-1)-alpha)
+  tset <- tibble(time=time, sensitivity=1/(1+exp(alpha+beta*time)))
+  tset <- tset %>% 
+    mutate(sensitivity=case_when(sensitivity>clinical_sensitivity~clinical_sensitivity,
+                                 TRUE~sensitivity))
+  return(tset)
 }
 
 plot_test_sensitivity <- function(sojourn_time,
@@ -114,7 +119,8 @@ prospective_test_sensitivity <- function(N=1000,
                                          indolent_rate=0,
                                          test_age=50,
                                          onset_sensitivity=0.2,
-                                         clinical_sensitivity=0.8){
+                                         clinical_sensitivity=0.8,
+                                         indolent_sensitivity=NULL){
   # simulate ages at preclinical onset and clinical diagnosis
   dset <- tibble(onset_age=start_age+rexp(N, rate=preonset_rate),
                  sojourn_time=rexp(N, rate=1/mean_sojourn_time),
@@ -134,6 +140,11 @@ prospective_test_sensitivity <- function(N=1000,
                                                       onset_sensitivity,
                                                       clinical_sensitivity,
                                                       time=test_age-onset_age)$sensitivity)
+  # update indolent sensitivity
+  if(!is.null(indolent_sensitivity)){
+    pset <- pset %>% mutate(prosp_sens=case_when(indolent==1~indolent_sensitivity,
+                                                 TRUE~prosp_sens))
+  }
   pcheck <- pset %>% filter(indolent == 0)
   pcheck <- pcheck %>% with(all(between(prosp_sens,
                                         onset_sensitivity,
@@ -194,6 +205,7 @@ control <- function(N=10000,
                     test_age=seq(50, 70, by=10),
                     onset_sensitivity=0.2,
                     clinical_sensitivity=0.8,
+                    indolent_sensitivity=0.2,
                     ext='png',
                     saveit=FALSE){
   # visualize how test sensitivity increases over sojourn time
@@ -212,7 +224,8 @@ control <- function(N=10000,
                                                                indolent_rate,
                                                                test_age,
                                                                onset_sensitivity,
-                                                               clinical_sensitivity))
+                                                               clinical_sensitivity,
+                                                               indolent_sensitivity))
   dset <- dset %>% unnest(results)
   dset <- dset %>% ungroup()
   # how does bias depend on testing age (mst 2, 0% non-progressive)?
