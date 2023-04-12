@@ -23,22 +23,25 @@ library(tidyverse)
 library(purrrlyr)
 library(viridis)
 library(scales)
+library(stringr)
 library(here)
 library(foreach)
 library(doParallel)
+library(tidyr)
 
-# datestamp <- "2022-12-12"
-# datestamp <- "2023-01-26"
-# datestamp <- "2023-01-31"
-# datestamp <- "2023-02-02"
-# datestamp <- "2023-02-06"
-# datestamp <- "2023-02-07"
-# datestamp <- "2023-02-08"
-# datestamp <- "2023-02-09"
-# datestamp <- "2023-02-21"
-# datestamp <- "2023-02-27"
-# datestamp <- "2023-03-01"
-datestamp <- "2023-03-06"
+# datestamp <- '2022-12-12'
+# datestamp <- '2023-01-26'
+# datestamp <- '2023-01-31'
+# datestamp <- '2023-02-02'
+# datestamp <- '2023-02-06'
+# datestamp <- '2023-02-07'
+# datestamp <- '2023-02-08'
+# datestamp <- '2023-02-09'
+# datestamp <- '2023-02-21'
+# datestamp <- '2023-02-27'
+# datestamp <- '2023-03-01'
+# datestamp <- '2023-03-06'
+datestamp <- '2023-04-10'
 
 set.seed(1234)
 
@@ -52,9 +55,11 @@ test_sensitivity <- function(sojourn_time,
                              onset_sensitivity,
                              clinical_sensitivity,
                              time=seq(0, 20)){
-  alpha=log(1/onset_sensitivity-1)
-  beta=1/sojourn_time*(log(1/clinical_sensitivity-1)-alpha)
-  tset <- tibble(time=time, sensitivity=1/(1+exp(alpha+beta*time)))
+  # alpha=log(1/onset_sensitivity-1)
+  # beta=1/sojourn_time*(log(1/clinical_sensitivity-1)-alpha)
+  alpha <- -log(clinical_sensitivity/onset_sensitivity)
+  beta <- -log(onset_sensitivity/clinical_sensitivity)-alpha
+  tset <- tibble(time=time, sensitivity=1/(1+exp(-(alpha+beta/sojourn_time*time))))
   tset <- tset %>% 
     mutate(sensitivity=case_when(sensitivity>clinical_sensitivity~clinical_sensitivity,
                                  TRUE~sensitivity))
@@ -94,7 +99,7 @@ plot_test_sensitivity <- function(sojourn_time,
   print(gg)
   if(saveit){
     filname <- str_glue('fig_sens_{datestamp}.{ext}')
-    ggsave(here("plot", filname), gg)
+    ggsave(here('plot', filname), gg)
   }
 }
 
@@ -154,6 +159,198 @@ prospective_test_sensitivity <- function(N=1000,
 }
 
 ##################################################
+# Mathematical formula of preclinical sensitivity
+## f(t, t0, preonset_rate): function of preclinical onset time and onset rate
+##            t: preclinical onset age 
+##            t0: initial age at start of simulation
+##            preonset_rate: preclinical onset rate
+## g(t, st, mean_sojourn_time): function of sojourn time
+##            t: preclinical onset age
+##            st: clinical onset age 
+##            mean_sojourn_time: mean sojourn time
+## G(t, mean_sojourn_time): cumulative distribution function of sojourn time and mean sojourn time
+##            t: preclinical onset age
+##            t1: screen age
+##            mean_sojourn_time: mean sojourn time
+## h(t, st, t1, onset_sensitivity, clinical_sensitivity, mean_sojourn_time): true sensitivity
+##            t: preclinical onset age
+##            st: clinical onset age
+##            t1: screen age
+##            onset_sensitivity: sensitivity at prelinical onset, lower bound of sensitivity
+##            clinical_sensitivity: sensitivity at clinical onset, upper bound of sensitivity
+##            mean_sojourn_time: mean sojourn time
+## f_sens_st(s, u, t1, onset_sensitivity, clinical_sensitivity, mean_sojourn_time): function of true sensitivity and sojourn time
+##            s: clinical onset age
+##            u: preclinical onset age
+##            t1: screen age
+##            onset_sensitivity: sensitivity at prelinical onset, lower bound of sensitivity
+##            clinical_sensitivity: sensitivity at clinical onset, upper bound of sensitivity
+##            mean_sojourn_time: mean sojourn time
+## prospective_sens_num(u, t1, t0, onset_sensitivity, clinical_sensitivity, preonset_rate, mean_sojourn_time):
+## numerator of prospective sensitivity
+##            u: preclinical onset age
+##            t1: upper bound of integral
+##            t0: lower bound of integral
+##            onset_sensitivity: sensitivity at prelinical onset, lower bound of sensitivity
+##            clinical_sensitivity: sensitivity at clinical onset, upper bound of sensitivity
+##            preonset_rate: exponential rate of cancer onset
+##            mean_sojourn_time: mean sojourn time
+## prospective_sens_denom(u, t1, t0, preonset_rate, mean_sojourn_time):
+## denominator of prospective sensitivity
+##            t1: upper bound of integral
+##            t0: lower bound of integral
+##            preonset_rate: exponential rate of cancer onset
+##            mean_sojourn_time: mean sojourn time
+##################################################
+
+f <- function(t, t0, preonset_rate){
+  preonset_rate*exp(-preonset_rate*(t-t0))
+}
+
+g <- function(t, st, mean_sojourn_time){
+  1/mean_sojourn_time*exp(-1/mean_sojourn_time*(st-t))
+}
+
+G <- function(t, t1, mean_sojourn_time){
+  1-exp(-(1/mean_sojourn_time)*(t1-t))
+}
+
+h <- function(t, st, t1, onset_sensitivity, clinical_sensitivity){
+  alpha <- -log(clinical_sensitivity/onset_sensitivity)
+  beta <- -log(onset_sensitivity/clinical_sensitivity)-alpha
+  sensitivity <- 1/(1+exp(-(alpha+beta/(st-t)*(t1-t))))
+  sensitivity <- ifelse(sensitivity>clinical_sensitivity, clinical_sensitivity, sensitivity)
+  return(sensitivity)
+}
+
+
+f_sens_mst <- function(s, u, t1, onset_sensitivity, clinical_sensitivity, mean_sojourn_time){
+  h(u, s, t1, onset_sensitivity, clinical_sensitivity)*g(u, s, mean_sojourn_time)
+}
+
+prospective_sens_num <- function(u, t1, t0,
+                                 onset_sensitivity, clinical_sensitivity,
+                                 preonset_rate, mean_sojourn_time){
+  f(u, t0, preonset_rate)*
+    integrate(f_sens_mst,
+              lower=t1, upper=Inf,
+              u=u,
+              t1=t1, 
+              onset_sensitivity=onset_sensitivity,
+              clinical_sensitivity=clinical_sensitivity,
+              mean_sojourn_time=mean_sojourn_time)$value
+}
+
+prospective_sens_denom <- function(u, t1, t0, preonset_rate, mean_sojourn_time){
+  f(u, t0, preonset_rate)*(1-G(u, t1, mean_sojourn_time))
+}
+
+
+prospective_sens <- function(start_age, screen_age, onset_sensitivity, clinical_sensitivity, preonset_rate, mean_sojourn_time){
+  prospective_sens_num_intgrel <- 
+    integrate(Vectorize(prospective_sens_num),
+              lower=start_age, upper=screen_age,
+              t1=screen_age, 
+              t0=start_age,
+              onset_sensitivity=onset_sensitivity,
+              clinical_sensitivity=clinical_sensitivity,
+              preonset_rate=preonset_rate,
+              mean_sojourn_time=mean_sojourn_time)$value
+
+  prospective_sens_denom_intgrel <- 
+    integrate(prospective_sens_denom,
+              lower=start_age, upper=screen_age, 
+              t1=screen_age,
+              t0=start_age,
+              preonset_rate=preonset_rate, mean_sojourn_time=mean_sojourn_time)$value
+  
+  return(ifelse(prospective_sens_denom_intgrel==0,
+                onset_sensitivity, 
+                prospective_sens_num_intgrel/prospective_sens_denom_intgrel))
+}
+
+##################################################
+# Compare prospective sensitivity estimated from simulation, 
+# analytic formula, with true sensitivity
+## N: sample size
+## start_age: initial age at start of simulation
+## test_age: age at one-time screening test
+## preonset_rate: exponential rate of cancer onset
+## mean_sojourn_time: exponential mean sojourn time
+## onset_sensitivity: test sensitivity at onset
+## clinical_sensitivity: test sensitivity at clinical diagnosis
+##################################################
+sens_compare <- function(N,
+                         start_age=40,
+                         screen_age,
+                         preonset_rate=0.1,
+                         mean_sojourn_time,
+                         onset_sensitivity=0.2,
+                         clinical_sensitivity=0.8){
+  
+  analytic_sens <- prospective_sens(start_age, screen_age, onset_sensitivity, clinical_sensitivity, preonset_rate, mean_sojourn_time)
+  sim_sens_tb <- prospective_test_sensitivity(N,
+                               start_age,
+                               preonset_rate,
+                               mean_sojourn_time,
+                               indolent_rate=0,
+                               test_age=screen_age,
+                               onset_sensitivity,
+                               clinical_sensitivity,
+                               indolent_sensitivity=NULL)[[1]]
+  sim_sens <- mean(sim_sens_tb$prosp_sens)
+  
+  return(list(tibble(analytic_sens, sim_sens)))
+}
+
+##################################################
+# Visualize comparison of prospective sensitivity 
+# estimated from simulation, analytic formula, and true sensitivity
+## N: sample size
+## test_age: age at one-time screening test
+## mean_sojourn_time: exponential mean sojourn time
+## ext: figure filename extension
+## saveit: logical indicator of whether to save plot
+##################################################
+plot_sens_compare <- function(N,
+                              test_age, 
+                              mean_sojourn_time,
+                              ext='png',
+                              saveit){
+  dset <- expand_grid(test_age, mean_sojourn_time)
+  dset <- dset %>% group_by(test_age, mean_sojourn_time)
+  dset <- dset %>% mutate(results=sens_compare(N=N,
+                                               screen_age=test_age,
+                                               mean_sojourn_time=mean_sojourn_time))
+  dset <- dset %>% unnest(results)
+  dset <- dset %>% ungroup()
+  dset <- dset %>% pivot_longer(cols=ends_with('sens'), 
+                                names_to='type', values_to='sensitivity')
+  # dset$test_age <- factor(dset$test_age)
+  theme_set(theme_classic())
+  theme_update(axis.ticks.length=unit(0.2, 'cm'))
+  gg <- ggplot(dset, aes(x=test_age, y=sensitivity, color=type))
+  # gg <- gg+geom_boxplot()
+  gg <- gg+geom_line()
+  gg <- gg+facet_grid(.~mean_sojourn_time, labeller=label_both)
+  gg <- gg+xlab('Test age')
+  gg <- gg+ylab('Sensitivity')
+  gg <- gg+ylim(0,1)
+  gg <- gg+guides(color=guide_legend(title='Types of prospective sensitivity'))
+  gg <- gg+scale_color_discrete(labels=c('Analytic', 'Simulation'))
+  gg <- gg+theme(legend.position='bottom')
+  print(gg)
+  
+  if(saveit){
+    filname <- str_glue('fig_sens_compare_{datestamp}.{ext}')
+    ggsave(here('plot', filname),
+           gg,
+           width=6,
+           height=5)
+  }
+}
+
+##################################################
 # Visualize bias in true sensitivity obtained in
 # retrospective vs prospective screening settings
 # dset: tibble of prospective screening settings
@@ -187,7 +384,7 @@ plot_prospective_sensitivity <- function(dset,
   print(gg)
   if(saveit){
     filname <- str_glue('{varname}_{datestamp}.{ext}')
-    ggsave(here("plot", filname),
+    ggsave(here('plot', filname),
            gg,
            width=5,
            height=5)
@@ -252,6 +449,14 @@ control <- function(N=10000,
                                clinical_sensitivity,
                                ext=ext,
                                saveit=saveit)
+  
+  # compare different method of sensitivity
+  plot_sens_compare(N=1000,
+                    test_age=seq(40, 70, 2), 
+                    mean_sojourn_time=c(2, 5, 10),
+                    ext=ext,
+                    saveit=saveit)
+  
 }
 control(saveit=TRUE)
 
