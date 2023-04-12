@@ -159,7 +159,7 @@ prospective_test_sensitivity <- function(N=1000,
 }
 
 ##################################################
-# Mathematical formula of preclinical sensitivity
+# Mathematical formula of prospective sensitivity
 ## f(t, t0, preonset_rate): function of preclinical onset time and onset rate
 ##            t: preclinical onset age 
 ##            t0: initial age at start of simulation
@@ -305,7 +305,7 @@ sens_compare <- function(N,
 
 ##################################################
 # Visualize comparison of prospective sensitivity 
-# estimated from simulation, analytic formula, and true sensitivity
+# estimated from simulation and analytic formula
 ## N: sample size
 ## test_age: age at one-time screening test
 ## mean_sojourn_time: exponential mean sojourn time
