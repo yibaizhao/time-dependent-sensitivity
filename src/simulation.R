@@ -41,7 +41,8 @@ library(tidyr)
 # datestamp <- '2023-02-27'
 # datestamp <- '2023-03-01'
 # datestamp <- '2023-03-06'
-datestamp <- '2023-04-10'
+# datestamp <- '2023-04-10'
+datestamp <- '2023-04-18'
 
 set.seed(1234)
 
@@ -65,6 +66,7 @@ test_sensitivity <- function(sojourn_time,
                                  TRUE~sensitivity))
   return(tset)
 }
+
 
 plot_test_sensitivity <- function(sojourn_time,
                                   onset_sensitivity,
@@ -125,7 +127,9 @@ prospective_test_sensitivity <- function(N=1000,
                                          test_age=50,
                                          onset_sensitivity=0.2,
                                          clinical_sensitivity=0.8,
-                                         indolent_sensitivity=NULL){
+                                         indolent_sensitivity=NULL,
+                                         confirmation_test_rate=NULL, 
+                                         confirmation_test_sensitivity=NULL){
   # simulate ages at preclinical onset and clinical diagnosis
   dset <- tibble(onset_age=start_age+rexp(N, rate=preonset_rate),
                  sojourn_time=rexp(N, rate=1/mean_sojourn_time),
@@ -151,6 +155,10 @@ prospective_test_sensitivity <- function(N=1000,
                                                  TRUE~prosp_sens))
   }
   pcheck <- pset %>% filter(indolent == 0)
+  # update confirmation test
+  if(!is.null(confirmation_test_rate)&!is.null(confirmation_test_sensitivity)&confirmation_test_rate>0){
+    pset <- pset %>% mutate(prosp_sens=prosp_sens*confirmation_test_rate*confirmation_test_sensitivity)
+  }
   pcheck <- pcheck %>% with(all(between(prosp_sens,
                                         onset_sensitivity,
                                         clinical_sensitivity)))
@@ -365,7 +373,9 @@ plot_prospective_sensitivity <- function(dset,
   varlabel <- switch(varname,
                      test_age='Age at screening test (years)',
                      mean_sojourn_time='Mean sojourn time (years)',
-                     indolent_rate='Proportion non-progressive')
+                     indolent_rate='Proportion non-progressive',
+                     confirmation_test_rate='Percent of subjects who took confirmation test', 
+                     confirmation_test_sensitivity='Confirmation test sensitivity')
   dset <- dset %>% mutate(!!sym(varname):=factor(!!sym(varname)))
   theme_set(theme_classic())
   theme_update(axis.ticks.length=unit(0.2, 'cm'))
@@ -398,6 +408,8 @@ control <- function(N=10000,
                     preonset_rate=0.1,
                     mean_sojourn_time=c(2, 5, 10),
                     indolent_rate=c(0, 0.2, 0.4),
+                    confirmation_test_rate=c(0, 0.5, 1), 
+                    confirmation_test_sensitivity=c(0.6, 0.8, 1), 
                     start_age=40,
                     test_age=seq(50, 70, by=10),
                     onset_sensitivity=0.2,
@@ -446,6 +458,36 @@ control <- function(N=10000,
   dset_indolent_rate <- dset_indolent_rate %>% slice_min(mean_sojourn_time)
   dset_indolent_rate <- dset_indolent_rate %>% select(-test_age, -mean_sojourn_time)
   plot_prospective_sensitivity(dset_indolent_rate,
+                               clinical_sensitivity,
+                               ext=ext,
+                               saveit=saveit)
+  # how does bias depend on confirmation test (mst 2, age 50, indolent_rate=0.2, confirmation test sensitivity = 1)?
+  dset <- expand_grid(test_age=50, mean_sojourn_time=2, indolent_rate=0, confirmation_test_rate, confirmation_test_sensitivity)
+  dset <- dset %>% group_by(confirmation_test_rate, confirmation_test_sensitivity)
+  dset <- dset %>% mutate(results=prospective_test_sensitivity(N=N,
+                                                               start_age,
+                                                               preonset_rate,
+                                                               mean_sojourn_time,
+                                                               indolent_rate,
+                                                               test_age,
+                                                               onset_sensitivity,
+                                                               clinical_sensitivity,
+                                                               indolent_sensitivity,
+                                                               confirmation_test_rate, 
+                                                               confirmation_test_sensitivity))
+  dset <- dset %>% unnest(results)
+  dset <- dset %>% ungroup()
+  ## how does bias depend on confirmation test rate (mst 2, age 50, indolent_rate=0.2, confirmation test sensitivity = 0.6)?
+  dset_c_rate <- dset %>% slice_min(confirmation_test_sensitivity)
+  dset_c_rate <- dset_c_rate %>% select(-c(test_age, mean_sojourn_time, indolent_rate, confirmation_test_sensitivity))
+  plot_prospective_sensitivity(dset_c_rate,
+                               clinical_sensitivity,
+                               ext=ext,
+                               saveit=saveit)
+  ## how does bias depend on confirmation test sensitivity (mst 2, age 50, indolent_rate=0.2, confirmation test rate = 1)?
+  dset_c_sens <- dset %>% filter(confirmation_test_rate==1)
+  dset_c_sens <- dset_c_sens %>% select(-c(test_age, mean_sojourn_time, indolent_rate, confirmation_test_rate))
+  plot_prospective_sensitivity(dset_c_sens,
                                clinical_sensitivity,
                                ext=ext,
                                saveit=saveit)
