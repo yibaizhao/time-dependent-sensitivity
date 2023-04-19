@@ -156,8 +156,10 @@ prospective_test_sensitivity <- function(N=1000,
   }
   pcheck <- pset %>% filter(indolent == 0)
   # update confirmation test
-  if(!is.null(confirmation_test_rate)&!is.null(confirmation_test_sensitivity)&confirmation_test_rate>0){
-    pset <- pset %>% mutate(prosp_sens=prosp_sens*confirmation_test_rate*confirmation_test_sensitivity)
+  if(!is.null(confirmation_test_rate)&!is.null(confirmation_test_sensitivity)){
+    if(confirmation_test_rate>0){
+      pset <- pset %>% mutate(prosp_sens=prosp_sens*confirmation_test_rate*confirmation_test_sensitivity)
+    }
   }
   pcheck <- pcheck %>% with(all(between(prosp_sens,
                                         onset_sensitivity,
@@ -427,18 +429,19 @@ control <- function(N=10000,
   dset <- expand_grid(test_age, mean_sojourn_time, indolent_rate)
   dset <- dset %>% group_by(test_age, mean_sojourn_time, indolent_rate)
   dset <- dset %>% mutate(results=prospective_test_sensitivity(N=N,
-                                                               start_age,
-                                                               preonset_rate,
-                                                               mean_sojourn_time,
-                                                               indolent_rate,
-                                                               test_age,
-                                                               onset_sensitivity,
-                                                               clinical_sensitivity,
-                                                               indolent_sensitivity))
+                                                               start_age=start_age,
+                                                               preonset_rate=preonset_rate,
+                                                               mean_sojourn_time=mean_sojourn_time,
+                                                               indolent_rate=indolent_rate,
+                                                               test_age=test_age,
+                                                               onset_sensitivity=onset_sensitivity,
+                                                               clinical_sensitivity=clinical_sensitivity,
+                                                               indolent_sensitivity=indolent_sensitivity))
   dset <- dset %>% unnest(results)
   dset <- dset %>% ungroup()
   # how does bias depend on testing age (mst 2, 0% non-progressive)?
   dset_test_age <- dset %>% slice_min(mean_sojourn_time)
+  # dset_test_age <- dset %>% filter(mean_sojourn_time==5)
   dset_test_age <- dset_test_age %>% slice_min(indolent_rate)
   dset_test_age <- dset_test_age %>% select(-mean_sojourn_time, -indolent_rate)
   plot_prospective_sensitivity(dset_test_age,
