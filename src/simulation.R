@@ -44,7 +44,8 @@ library(tidyr)
 # datestamp <- '2023-04-10'
 # datestamp <- '2023-04-18'
 # datestamp <- '2023-05-24'
-datestamp <- '2023-06-2'
+# datestamp <- '2023-06-2'
+datestamp <- '2023-06-5'
 
 set.seed(1234)
 
@@ -103,7 +104,7 @@ plot_test_sensitivity <- function(sojourn_time,
   print(gg)
   if(saveit){
     filname <- str_glue('fig_sens_{datestamp}.{ext}')
-    ggsave(here('plot', filname), gg, height=4, width=4)
+    ggsave(here('plot', filname), gg, height=3, width=5)
    }
 }
 
@@ -121,14 +122,14 @@ plot_test_sensitivity <- function(sojourn_time,
 # onset_sensitivity: test sensitivity at onset
 # clinical_sensitivity: test sensitivity at clinical diagnosis
 ##################################################
-prospective_test_sensitivity <- function(N=1000,
-                                         start_age=40,
-                                         preonset_rate=0.1,
-                                         mean_sojourn_time=2,
-                                         indolent_rate=0,
-                                         test_age=50,
-                                         onset_sensitivity=0.2,
-                                         clinical_sensitivity=0.8,
+prospective_test_sensitivity <- function(N,
+                                         start_age,
+                                         preonset_rate,
+                                         mean_sojourn_time,
+                                         indolent_rate,
+                                         test_age,
+                                         onset_sensitivity,
+                                         clinical_sensitivity,
                                          indolent_sensitivity=NULL,
                                          confirmation_test_rate=NULL, 
                                          confirmation_test_sensitivity=NULL){
@@ -147,23 +148,26 @@ prospective_test_sensitivity <- function(N=1000,
   ccheck %>% stopifnot()
   # calculate true prospective test sensitivity among preclinical at test age
   pset <- dset %>% filter(onset_age <= test_age & test_age < clinical_age)
-  pset <- pset %>% mutate(prosp_sens=test_sensitivity(sojourn_time=sojourn_time,
+  pset <- pset %>% mutate(prosp_sens_all=test_sensitivity(sojourn_time=sojourn_time,
                                                       onset_sensitivity,
                                                       clinical_sensitivity,
                                                       time=test_age-onset_age)$sensitivity)
   # update indolent sensitivity
   if(!is.null(indolent_sensitivity)){
-    pset <- pset %>% mutate(prosp_sens=case_when(indolent==1~indolent_sensitivity,
-                                                 TRUE~prosp_sens))
+    pset <- pset %>% mutate(prosp_sens_all=case_when(indolent==1~indolent_sensitivity,
+                                                 TRUE~prosp_sens_all))
   }
   pcheck <- pset %>% filter(indolent == 0)
   # update confirmation test
   if(!is.null(confirmation_test_rate)&!is.null(confirmation_test_sensitivity)){
     if(confirmation_test_rate>0){
-      pset <- pset %>% mutate(prosp_sens=prosp_sens*confirmation_test_rate*confirmation_test_sensitivity)
+      pset <- pset %>% mutate(prosp_sens_all=prosp_sens_all*confirmation_test_rate*confirmation_test_sensitivity)
     }
   }
-  pcheck <- pcheck %>% with(all(between(prosp_sens,
+  # estimate prospective sensitivity for clinical significant cancer
+  pset <- pset %>% mutate(prosp_sens_sig=ifelse(indolent==0, (1-indolent_rate)*prosp_sens_all, NA))
+  
+  pcheck <- pcheck %>% with(all(between(prosp_sens_all,
                                         onset_sensitivity,
                                         clinical_sensitivity)))
   pcheck %>% stopifnot()
@@ -310,7 +314,7 @@ sens_compare <- function(N,
                                onset_sensitivity,
                                clinical_sensitivity,
                                indolent_sensitivity=NULL)[[1]]
-  sim_sens <- mean(sim_sens_tb$prosp_sens)
+  sim_sens <- mean(sim_sens_tb$prosp_sens_all)
   
   return(list(tibble(analytic_sens, sim_sens)))
 }
@@ -371,6 +375,7 @@ plot_sens_compare <- function(N,
 ##################################################
 plot_prospective_sensitivity <- function(dset,
                                          clinical_sensitivity,
+                                         significant_cancer_only=FALSE,
                                          ext='png',
                                          saveit=FALSE){
   varname <- names(dset)[1]
@@ -385,20 +390,32 @@ plot_prospective_sensitivity <- function(dset,
   theme_update(axis.ticks.length=unit(0.2, 'cm'))
   gg <- ggplot(dset)
   gg <- gg+geom_hline(aes(yintercept=clinical_sensitivity), linetype='dashed')
-  gg <- gg+geom_boxplot(aes_string(x=varname, y='prosp_sens'),
-                        fill='gray',
-                        width=1/2,
-                        position=position_dodge(width=0.4))
+  if(!significant_cancer_only){
+    gg <- gg+geom_boxplot(aes_string(x=varname, y='prosp_sens_all'),
+                          fill='gray',
+                          width=1/2,
+                          position=position_dodge(width=0.4))
+    gg <- gg+ylab('Prospective sensitivity')
+  }
+  if(significant_cancer_only){
+    gg <- gg+geom_boxplot(aes_string(x=varname, y='prosp_sens_sig'),
+                          fill='gray',
+                          width=1/2,
+                          position=position_dodge(width=0.4))
+    gg <- gg+ylab('Prospective sensitivity of detecting progressive cancer')
+  }
   gg <- gg+scale_x_discrete(name=varlabel)
-  gg <- gg+scale_y_continuous(name='Prospective sensitivity',
-                              limits=c(0, 1),
+  gg <- gg+scale_y_continuous(limits=c(0, 1),
                               breaks=seq(0, 1, by=0.2),
                               labels=label_percent(accuracy=1),
                               expand=c(0, 0))
   print(gg)
   if(saveit){
-    filname <- str_glue('{varname}_{datestamp}.{ext}')
-    ggsave(here('plot', filname),
+    filename <- str_glue('{varname}_{datestamp}.{ext}')
+    if(significant_cancer_only){
+      filename <- str_glue('{varname}_sig_{datestamp}.{ext}')
+    }
+    ggsave(here('plot', filename),
            gg,
            width=5,
            height=5)
@@ -409,13 +426,15 @@ plot_prospective_sensitivity_compare <- function(N,
                                                  dset,
                                                  start_age,
                                                  preonset_rate,
+                                                 onset_sensitivity,
                                                  clinical_sensitivity,
-                                                 indolent_sensitivity,
+                                                 indolent_sensitivity=NULL,
+                                                 significant_cancer_only=TRUE,
                                                  ext='png',
                                                  saveit=FALSE){
   # analytic_sens <- prospective_sens(start_age, screen_age, onset_sensitivity, clinical_sensitivity, preonset_rate, mean_sojourn_time)
   dset <- dset %>% group_by(across(all_of(names(dset)))) 
-  dset <- dset %>% mutate(prosp_sens=prospective_test_sensitivity(N=!!N,
+  dset <- dset %>% mutate(prosp_sens_all=prospective_test_sensitivity(N=!!N,
                                                                start_age=!!start_age,
                                                                preonset_rate=!!preonset_rate,
                                                                mean_sojourn_time=mean_sojourn_time,
@@ -427,22 +446,31 @@ plot_prospective_sensitivity_compare <- function(N,
                                                                confirmation_test_rate=confirmation_test_rate, 
                                                                confirmation_test_sensitivity=confirmation_test_sensitivity
   ))
-  dset <- dset %>% mutate(mean_prosp_sens=map(prosp_sens, ~mean(.x$prosp_sens)))
-  dset <- dset %>% select(-prosp_sens)
+  dset <- dset %>% mutate(mean_prosp_sens_all=map(prosp_sens_all, ~mean(.x$prosp_sens_all)))
+  dset <- dset %>% mutate(mean_prosp_sens_sig=map(prosp_sens_all, ~mean(.x$prosp_sens_sig, na.rm=TRUE)))
+  dset <- dset %>% select(-prosp_sens_all)
   dset <- dset %>% ungroup()
-  dset$mean_prosp_sens <- as.numeric(dset$mean_prosp_sens)
-
+  dset$mean_prosp_sens_all <- as.numeric(dset$mean_prosp_sens_all)
+  dset$mean_prosp_sens_sig <- as.numeric(dset$mean_prosp_sens_sig)
+  
   theme_set(theme_classic())
   theme_update(axis.ticks.length=unit(0.2, 'cm'))
-  gg <- dset %>% filter(test_age==70) %>% ggplot()
+  gg <- dset %>% ggplot()
   gg <- gg+geom_hline(aes(yintercept=clinical_sensitivity), linetype='dashed')
-  gg <- gg+geom_bar(aes(x=factor(mean_sojourn_time), y=mean_prosp_sens, fill=factor(indolent_rate)), 
-                    stat='identity', position = 'dodge')
+  if(!significant_cancer_only){
+    gg <- gg+geom_bar(aes(x=factor(mean_sojourn_time), y=mean_prosp_sens_all, fill=factor(indolent_rate)), 
+                      stat='identity', position = 'dodge')
+    gg <- gg+ylab('Prospective sensitivity')
+  }
+  if(significant_cancer_only){
+    gg <- gg+geom_bar(aes(x=factor(mean_sojourn_time), y=mean_prosp_sens_sig, fill=factor(indolent_rate)), 
+                      stat='identity', position = 'dodge')
+    gg <- gg+ylab('Prospective sensitivity of detecting progressive cancer')
+  }
   gg <- gg+facet_grid(confirmation_test_rate~confirmation_test_sensitivity, 
                       labeller = labeller(.rows = label_both, .cols = label_both))
   gg <- gg+scale_x_discrete(name='Mean sojourn time (years)')
-  gg <- gg+scale_y_continuous(name='Prospective sensitivity',
-                              limits=c(0, 1),
+  gg <- gg+scale_y_continuous(limits=c(0, 1),
                               breaks=seq(0, 1, by=0.2),
                               labels=label_percent(accuracy=1),
                               expand=c(0, 0))
@@ -450,6 +478,9 @@ plot_prospective_sensitivity_compare <- function(N,
   print(gg)
   if(saveit){
     filname <- str_glue('plot_compare_setting_{datestamp}.{ext}')
+    if(significant_cancer_only){
+      filname <- str_glue('plot_compare_sig_setting_{datestamp}.{ext}')
+    }
     ggsave(here('plot', filname),
            gg,
            width=10,
@@ -471,7 +502,7 @@ control <- function(N=10000,
                     test_age=seq(50, 70, by=10),
                     onset_sensitivity=0.2,
                     clinical_sensitivity=0.8,
-                    indolent_sensitivity=0.2,
+                    indolent_sensitivity=NULL,
                     ext='png',
                     saveit=FALSE){
   # visualize how test sensitivity increases over sojourn time
@@ -518,6 +549,12 @@ control <- function(N=10000,
                                clinical_sensitivity,
                                ext=ext,
                                saveit=saveit)
+  # how does bias depend on fraction that are non-progressive in terms of progressive cancer (mst 2, age 50)?
+  plot_prospective_sensitivity(dset_indolent_rate,
+                               clinical_sensitivity,
+                               significant_cancer_only=TRUE,
+                               ext=ext,
+                               saveit=saveit)
   # how does bias depend on confirmation test (mst 2, age 50, indolent_rate=0.2, confirmation test sensitivity = 1)?
   dset <- expand_grid(test_age=50, mean_sojourn_time=2, indolent_rate=0, confirmation_test_rate, confirmation_test_sensitivity)
   dset <- dset %>% group_by(confirmation_test_rate, confirmation_test_sensitivity)
@@ -553,13 +590,21 @@ control <- function(N=10000,
   plot_sens_compare(N=1000,
                     test_age=seq(40, 70, 2), 
                     mean_sojourn_time=c(2, 5, 10),
+                    significant_cancer_only=TRUE,
                     ext=ext,
                     saveit=saveit)
   
   # compare different settings using analytic model
-  dset <- expand_grid(test_age, mean_sojourn_time, indolent_rate, confirmation_test_rate, confirmation_test_sensitivity)
-  plot_prospective_sensitivity_compare(N, dset, start_age, preonset_rate, clinical_sensitivity, indolent_sensitivity,
-                                       ext='png', saveit)
+  dset <- expand_grid(test_age=45, mean_sojourn_time, indolent_rate, confirmation_test_rate, confirmation_test_sensitivity)
+  plot_prospective_sensitivity_compare(N=N, 
+                                       dset=dset, 
+                                       start_age=start_age, 
+                                       preonset_rate=preonset_rate, 
+                                       onset_sensitivity=onset_sensitivity,
+                                       clinical_sensitivity=clinical_sensitivity, 
+                                       significant_cancer_only=TRUE,
+                                       ext='png', 
+                                       saveit=saveit)
   
 }
 control(saveit=TRUE)
