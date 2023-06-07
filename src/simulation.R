@@ -28,6 +28,7 @@ library(here)
 library(foreach)
 library(doParallel)
 library(tidyr)
+library(viridis)
 
 # datestamp <- '2022-12-12'
 # datestamp <- '2023-01-26'
@@ -448,49 +449,87 @@ plot_prospective_sensitivity_compare <- function(N,
                                                  saveit=FALSE){
   # analytic_sens <- prospective_sens(start_age, screen_age, onset_sensitivity, clinical_sensitivity, preonset_rate, mean_sojourn_time)
   dset <- dset %>% group_by(across(all_of(names(dset))))
-  dset <- dset %>% mutate(prosp_sens_all=prospective_test_sensitivity(N=!!N,
-                                                               start_age=!!start_age,
-                                                               preonset_rate=!!preonset_rate,
-                                                               mean_sojourn_time=mean_sojourn_time,
-                                                               indolent_rate=indolent_rate,
-                                                               test_age=test_age,
-                                                               onset_sensitivity=!!onset_sensitivity,
-                                                               clinical_sensitivity=!!clinical_sensitivity,
-                                                               indolent_sensitivity=!!indolent_sensitivity,
-                                                               confirmation_test_rate=confirmation_test_rate,
-                                                               confirmation_test_sensitivity=confirmation_test_sensitivity))
+  dset <- dset %>% mutate(prosp_sens_all=prospective_test_sensitivity(N=N,
+                                                                      start_age=start_age,
+                                                                      preonset_rate=preonset_rate,
+                                                                      mean_sojourn_time=mean_sojourn_time,
+                                                                      indolent_rate=indolent_rate,
+                                                                      test_age=test_age,
+                                                                      onset_sensitivity=onset_sensitivity,
+                                                                      clinical_sensitivity=clinical_sensitivity,
+                                                                      indolent_sensitivity=indolent_sensitivity,
+                                                                      confirmation_test_rate=confirmation_test_rate,
+                                                                      confirmation_test_sensitivity=confirmation_test_sensitivity))
   dset <- dset %>% mutate(mean_prosp_sens_all=map(prosp_sens_all, ~mean(.x$prosp_sens_all)))
   dset <- dset %>% mutate(mean_prosp_sens_sig=map(prosp_sens_all, ~mean(.x$prosp_sens_sig, na.rm=TRUE)))
   dset <- dset %>% select(-prosp_sens_all)
   dset <- dset %>% ungroup()
   dset <- dset %>% unnest(c(mean_prosp_sens_all, mean_prosp_sens_sig))
+  dset <- dset %>% mutate(degradation_all=clinical_sensitivity-mean_prosp_sens_all,
+                          degradation_sig=clinical_sensitivity-mean_prosp_sens_sig,
+                          mean_sojourn_time=factor(mean_sojourn_time),
+                          indolent_rate=factor(indolent_rate),
+                          confirmation_test_rate=paste('Confirmation test\nfrequency', sprintf('%2.0f%%', 100*confirmation_test_rate)),
+                          confirmation_test_sensitivity=paste('Confirmation test\nsensitivity', sprintf('%2.0f%%', 100*confirmation_test_sensitivity)),
+                          confirmation_test_rate=factor(confirmation_test_rate,
+                                                        levels=c('Confirmation test\nfrequency 100%',
+                                                                 'Confirmation test\nfrequency 60%',
+                                                                 'Confirmation test\nfrequency 40%')),
+                          confirmation_test_sensitivity=factor(confirmation_test_sensitivity,
+                                                               levels=c('Confirmation test\nsensitivity 100%',
+                                                                        'Confirmation test\nsensitivity 80%',
+                                                                        'Confirmation test\nsensitivity 60%')))
   theme_set(theme_classic())
-  theme_update(axis.ticks.length=unit(0.2, 'cm'))
+  theme_update(axis.ticks.length=unit(0.2, 'cm'),
+               panel.grid.major.y=element_line(),
+               panel.spacing=unit(0.04, 'npc'),
+               strip.text.y=element_text(color='black', angle=0),
+               strip.background=element_rect(color=NA, fill=NA))
   gg <- dset %>% ggplot()
   gg <- gg+geom_hline(aes(yintercept=clinical_sensitivity), linetype='dashed')
   if(significant_cancer_only){
-    gg <- gg+geom_bar(aes(x=factor(mean_sojourn_time),
+    gg <- gg+geom_bar(aes(x=mean_sojourn_time,
                           y=mean_prosp_sens_sig,
-                          fill=factor(indolent_rate)),
+                          fill=indolent_rate),
                       stat='identity',
-                      position='dodge')
-    gg <- gg+ylab('Prospective sensitivity of detecting progressive cancer')
+                      position=position_dodge(width=1))
+    gg <- gg+geom_linerange(aes(xmin=mean_sojourn_time,
+                                ymin=mean_prosp_sens_sig,
+                                x=mean_sojourn_time,
+                                y=mean_prosp_sens_sig,
+                                xmax=mean_sojourn_time,
+                                ymax=clinical_sensitivity,
+                                color=indolent_rate),
+                            alpha=0.3,
+                            position=position_dodge(width=1))
+    gg <- gg+geom_label(aes(x=mean_sojourn_time,
+                            y=mean_prosp_sens_sig+degradation_sig/2,
+                            label=sprintf('%2.0f%%', 100*degradation_sig),
+                            color=indolent_rate),
+                        size=2,
+                        label.size=0,
+                        label.padding=unit(0.1, 'lines'),
+                        position=position_dodge2(width=1),
+                        show.legend=FALSE)
+    gg <- gg+ylab('Prospective sensitivity for progressive cancer')
   } else {
-    gg <- gg+geom_bar(aes(x=factor(mean_sojourn_time),
+    gg <- gg+geom_bar(aes(x=mean_sojourn_time,
                           y=mean_prosp_sens_all,
-                          fill=factor(indolent_rate)),
+                          fill=indolent_rate),
                       stat='identity',
                       position='dodge')
-    gg <- gg+ylab('Prospective sensitivity')
+    gg <- gg+ylab('Prospective sensitivity for any cancer')
   }
-  gg <- gg+facet_grid(confirmation_test_rate~confirmation_test_sensitivity,
-                      labeller=labeller(.rows=label_both, .cols=label_both))
-  gg <- gg+scale_x_discrete(name='Mean sojourn time (years)')
+  gg <- gg+geom_hline(aes(yintercept=0))
+  gg <- gg+facet_grid(confirmation_test_rate~confirmation_test_sensitivity)
+  gg <- gg+scale_x_discrete(name='Mean sojourn time (years)',
+                            expand=c(0, 0))
   gg <- gg+scale_y_continuous(limits=c(0, 1),
                               breaks=seq(0, 1, by=0.2),
                               labels=label_percent(accuracy=1),
                               expand=c(0, 0))
-  gg <- gg+guides(fill=guide_legend(title="Indolent rate"))
+  gg <- gg+scale_color_viridis(name='Indolent rate', discrete=TRUE)
+  gg <- gg+scale_fill_viridis(name='Indolent rate', discrete=TRUE)
   print(gg)
   if(saveit){
     if(significant_cancer_only){
