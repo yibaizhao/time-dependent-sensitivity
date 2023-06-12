@@ -49,7 +49,8 @@ library(viridis)
 #datestamp <- '2023-06-05'
 #datestamp <- '2023-06-07'
 # datestamp <- '2023-06-08'
-datestamp <- '2023-06-09'
+#datestamp <- '2023-06-09'
+datestamp <- '2023-06-12'
 
 set.seed(1234)
 
@@ -58,6 +59,7 @@ set.seed(1234)
 # sojourn_time: sojourn time in years
 # onset_sensitivity: test sensitivity at onset
 # clinical_sensitivity: test sensitivity at clinical diagnosis
+# TODO: Determine annotation positions programmatically
 ##################################################
 test_sensitivity <- function(sojourn_time,
                              onset_sensitivity,
@@ -74,7 +76,6 @@ test_sensitivity <- function(sojourn_time,
   return(tset)
 }
 
-
 plot_test_sensitivity <- function(sojourn_time,
                                   onset_sensitivity,
                                   clinical_sensitivity,
@@ -87,10 +88,37 @@ plot_test_sensitivity <- function(sojourn_time,
                                           clinical_sensitivity))
   sset <- sset %>% unnest(sensitivity)
   theme_set(theme_classic())
-  theme_update(axis.ticks.length=unit(0.2, 'cm'))
+  theme_update(axis.ticks.length=unit(0.2, 'cm'),
+               legend.position='bottom')
   gg <- ggplot(sset)
-  gg <- gg+geom_hline(aes(yintercept=onset_sensitivity), linetype='dashed')
   gg <- gg+geom_hline(aes(yintercept=clinical_sensitivity), linetype='dashed')
+  gg <- gg+geom_hline(aes(yintercept=onset_sensitivity), color='red')
+  gg <- gg+annotate('segment',
+                    x=5,
+                    xend=5,
+                    y=0.1,
+                    yend=0.18,
+                    colour='red',
+                    arrow=arrow(length=unit(0.2, 'cm'), type='closed'))
+  gg <- gg+annotate('text',
+                    x=5,
+                    y=0.1,
+                    color='red',
+                    vjust=1.5,
+                    label='Indolent cancer')
+  gg <- gg+geom_segment(data=sset %>% filter(sojourn_time == time),
+                        aes(x=5,
+                            xend=time,
+                            y=0.95,
+                            yend=0.85),
+                        colour='black',
+                        arrow=arrow(length=unit(0.2, 'cm'), type='closed'))
+  gg <- gg+annotate('text',
+                    x=5,
+                    y=0.95,
+                    color='black',
+                    vjust=-0.5,
+                    label='Progressive cancer')
   gg <- gg+geom_line(aes(x=time,
                          y=sensitivity,
                          group=sojourn_time,
@@ -104,14 +132,14 @@ plot_test_sensitivity <- function(sojourn_time,
                               breaks=seq(0, 1, by=0.2),
                               labels=label_percent(accuracy=1),
                               expand=c(0, 0))
-  gg <- gg+scale_colour_viridis(name='Sojourn\ntime')
+  gg <- gg+scale_colour_viridis(name='Sojourn time')
   print(gg)
   if(saveit){
-    filename <- str_glue('fig_sens_{datestamp}.{ext}')
+    filename <- str_glue('true_sensitivity_{datestamp}.{ext}')
     ggsave(here('plot', filename),
            plot=gg,
-           height=3,
-           width=5)
+           height=6,
+           width=6)
   }
 }
 
