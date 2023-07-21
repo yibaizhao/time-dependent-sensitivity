@@ -50,7 +50,8 @@ library(viridis)
 #datestamp <- '2023-06-07'
 # datestamp <- '2023-06-08'
 #datestamp <- '2023-06-09'
-datestamp <- '2023-06-12'
+# datestamp <- '2023-06-12'
+datestamp <- '2023-06-21'
 
 set.seed(1234)
 
@@ -64,15 +65,27 @@ set.seed(1234)
 test_sensitivity <- function(sojourn_time,
                              onset_sensitivity,
                              clinical_sensitivity,
-                             time=seq(0, 20)){
+                             is_indolent=FALSE,
+                             param_indolent=5,
+                             time=seq(0, 20),
+                             method='linear'){
   # alpha=log(1/onset_sensitivity-1)
   # beta=1/sojourn_time*(log(1/clinical_sensitivity-1)-alpha)
-  alpha <- -log(clinical_sensitivity/onset_sensitivity)
-  beta <- -log(onset_sensitivity/clinical_sensitivity)-alpha
-  tset <- tibble(time=time, sensitivity=1/(1+exp(-(alpha+beta/sojourn_time*time))))
-  tset <- tset %>%
-    mutate(sensitivity=case_when(sensitivity>clinical_sensitivity~clinical_sensitivity,
-                                 TRUE~sensitivity))
+  if(!is_indolent){
+    if(method=='linear'){
+      alpha <- onset_sensitivity
+      beta <- (clinical_sensitivity-onset_sensitivity)/sojourn_time
+      tset <- tibble(time=time, sensitivity=alpha+beta*time)
+    }else{
+      alpha <- -log(clinical_sensitivity/onset_sensitivity)
+      beta <- -log(onset_sensitivity/clinical_sensitivity)-alpha
+      tset <- tibble(time=time, sensitivity=1/(1+exp(-(alpha+beta/sojourn_time*time))))
+    }
+    tset <- tset %>%
+      mutate(sensitivity=ifelse(sensitivity>clinical_sensitivity, NA, sensitivity))
+  }else{
+    tset <- onset_sensitivity+(clinical_sensitivity-onset_sensitivity)/(1+exp(-(1/sojourn_time)*(time-param_indolent)))
+  }
   return(tset)
 }
 
@@ -190,7 +203,14 @@ prospective_test_sensitivity <- function(N,
   # update indolent sensitivity
   if(!is.null(indolent_sensitivity)){
     pset <- pset %>% mutate(prosp_sens_all=case_when(indolent==1~indolent_sensitivity,
-                                                 TRUE~prosp_sens_all))
+                                                     TRUE~prosp_sens_all))
+  }else{
+    pset <- pset %>% mutate(prosp_sens_all=case_when(indolent==1~test_sensitivity(sojourn_time=sojourn_time,
+                                                                                  onset_sensitivity=onset_sensitivity,
+                                                                                  clinical_sensitivity=clinical_sensitivity,
+                                                                                  is_indolent=TRUE,
+                                                                                  time=(test_age-onset_age))$sensitivity,
+                                                     TRUE~prosp_sens_all))
   }
   pcheck <- pset %>% filter(indolent == 0)
   # update confirmation test
