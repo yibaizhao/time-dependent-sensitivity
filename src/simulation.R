@@ -51,7 +51,8 @@ library(viridis)
 # datestamp <- '2023-06-08'
 #datestamp <- '2023-06-09'
 # datestamp <- '2023-06-12'
-datestamp <- '2023-06-21'
+# datestamp <- '2023-06-21'
+datestamp <- '2023-07-24'
 
 set.seed(1234)
 
@@ -82,9 +83,10 @@ test_sensitivity <- function(sojourn_time,
       tset <- tibble(time=time, sensitivity=1/(1+exp(-(alpha+beta/sojourn_time*time))))
     }
     tset <- tset %>%
-      mutate(sensitivity=ifelse(sensitivity>clinical_sensitivity, NA, sensitivity))
+      mutate(sensitivity=ifelse(sensitivity<=clinical_sensitivity, sensitivity, NA))
   }else{
-    tset <- onset_sensitivity+(clinical_sensitivity-onset_sensitivity)/(1+exp(-(1/sojourn_time)*(time-param_indolent)))
+    tset <- tibble(time=time, 
+                   sensitivity=onset_sensitivity+(clinical_sensitivity-onset_sensitivity)/(1+exp(-(1/sojourn_time)*(time-param_indolent))))
   }
   return(tset)
 }
@@ -94,18 +96,24 @@ plot_test_sensitivity <- function(sojourn_time,
                                   clinical_sensitivity,
                                   ext='png',
                                   saveit=FALSE){
-  sset <- tibble(sojourn_time)
-  sset <- sset %>% mutate(sensitivity=map(sojourn_time,
+  sset0 <- tibble(sojourn_time)
+  sset1 <- sset0 %>% mutate(sensitivity=map(sojourn_time,
                                           test_sensitivity,
                                           onset_sensitivity,
                                           clinical_sensitivity))
-  sset <- sset %>% unnest(sensitivity)
+  sset1 <- sset1 %>% unnest(sensitivity)
+  sset2 <- sset0 %>% mutate(sensitivity=map(sojourn_time,
+                                         test_sensitivity,
+                                         onset_sensitivity,
+                                         clinical_sensitivity,
+                                         is_indolent=TRUE))
+  sset2 <- sset2 %>% unnest(sensitivity)
   theme_set(theme_classic())
   theme_update(axis.ticks.length=unit(0.2, 'cm'),
                legend.position='bottom')
-  gg <- ggplot(sset)
+  gg <- ggplot(sset1)
   gg <- gg+geom_hline(aes(yintercept=clinical_sensitivity), linetype='dashed')
-  gg <- gg+geom_hline(aes(yintercept=onset_sensitivity), color='red')
+  # gg <- gg+geom_hline(aes(yintercept=onset_sensitivity), color='red')
   gg <- gg+annotate('segment',
                     x=5,
                     xend=5,
@@ -119,7 +127,7 @@ plot_test_sensitivity <- function(sojourn_time,
                     color='red',
                     vjust=1.5,
                     label='Indolent cancer')
-  gg <- gg+geom_segment(data=sset %>% filter(sojourn_time == time),
+  gg <- gg+geom_segment(data=sset1 %>% filter(sojourn_time == time),
                         aes(x=5,
                             xend=time,
                             y=0.95,
@@ -136,6 +144,12 @@ plot_test_sensitivity <- function(sojourn_time,
                          y=sensitivity,
                          group=sojourn_time,
                          colour=sojourn_time))
+  gg <- gg+geom_line(data=sset2,
+                     aes(x=time,
+                         y=sensitivity,
+                         group=sojourn_time,
+                         colour=sojourn_time),
+                     linetype=2)
   gg <- gg+scale_x_continuous(name='Years since onset',
                               limits=c(0, max(sojourn_time)),
                               breaks=c(0, sojourn_time),
@@ -184,16 +198,20 @@ prospective_test_sensitivity <- function(N,
   # simulate ages at preclinical onset and clinical diagnosis
   dset <- tibble(onset_age=start_age+rexp(N, rate=preonset_rate),
                  sojourn_time=rexp(N, rate=1/mean_sojourn_time),
-                 indolent=rbinom(N, 1, indolent_rate),
+                 indolent=rbinom(N, 1, indolent_rate)==1,
                  clinical_age=ifelse(indolent, Inf, onset_age+sojourn_time))
   # confirm retrospective test sensitivity at clinical diagnosis
   cset <- dset %>% filter(is.finite(clinical_age))
-  cset <- cset %>% mutate(retro_sens=test_sensitivity(sojourn_time=sojourn_time,
+  cset <- cset %>% group_by(sojourn_time, indolent) %>%
+    mutate(retro_sens=test_sensitivity(sojourn_time=sojourn_time,
                                                       onset_sensitivity,
                                                       clinical_sensitivity,
-                                                      time=sojourn_time)$sensitivity)
-  ccheck <- cset %>% with(all(retro_sens == clinical_sensitivity))
-  ccheck %>% stopifnot()
+                                                      is_indolent=indolent,
+                                                      time=sojourn_time)$sensitivity) %>%
+    ungroup()
+  cset <- cset %>% mutate(retro_sens=ifelse(is.na(retro_sens), clinical_sensitivity, retro_sens))
+  # ccheck <- cset %>% with(all(retro_sens == clinical_sensitivity))
+  # ccheck %>% stopifnot()
   # calculate true prospective test sensitivity among preclinical at test age
   pset <- dset %>% filter(onset_age <= test_age & test_age < clinical_age)
   pset <- pset %>% mutate(prosp_sens_all=test_sensitivity(sojourn_time=sojourn_time,
