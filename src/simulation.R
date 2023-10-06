@@ -52,7 +52,9 @@ library(viridis)
 #datestamp <- '2023-06-09'
 # datestamp <- '2023-06-12'
 # datestamp <- '2023-06-21'
-datestamp <- '2023-07-24'
+# datestamp <- '2023-07-24'
+# datestamp <- '2023-07-26'
+datestamp <- '2023-07-31'
 
 set.seed(1234)
 
@@ -304,11 +306,15 @@ G <- function(t, t1, mean_sojourn_time){
   1-exp(-(1/mean_sojourn_time)*(t1-t))
 }
 
-h <- function(t, st, t1, onset_sensitivity, clinical_sensitivity){
-  alpha <- -log(clinical_sensitivity/onset_sensitivity)
-  beta <- -log(onset_sensitivity/clinical_sensitivity)-alpha
-  sensitivity <- 1/(1+exp(-(alpha+beta/(st-t)*(t1-t))))
-  sensitivity <- ifelse(sensitivity>clinical_sensitivity, clinical_sensitivity, sensitivity)
+h <- function(t, st, t1, onset_sensitivity, clinical_sensitivity, indolent_rate=0){
+  if(indolent_rate==0){
+    alpha <- -log(clinical_sensitivity/onset_sensitivity)
+    beta <- -log(onset_sensitivity/clinical_sensitivity)-alpha
+    sensitivity <- 1/(1+exp(-(alpha+beta/(st-t)*(t1-t))))
+    sensitivity <- ifelse(sensitivity>clinical_sensitivity, clinical_sensitivity, sensitivity)
+  }else{
+    sensitivity <- 0.2
+  }
   return(sensitivity)
 }
 
@@ -322,19 +328,28 @@ prospective_sens_num <- function(u,
                                  onset_sensitivity,
                                  clinical_sensitivity,
                                  preonset_rate,
-                                 mean_sojourn_time){
-  f(u, t0, preonset_rate)*
-    integrate(f_sens_mst,
-              lower=t1, upper=Inf,
-              u=u,
-              t1=t1,
-              onset_sensitivity=onset_sensitivity,
-              clinical_sensitivity=clinical_sensitivity,
-              mean_sojourn_time=mean_sojourn_time)$value
+                                 mean_sojourn_time,
+                                 indolent_rate=0){
+  if(indolent_rate==0){
+    f(u, t0, preonset_rate)*
+      integrate(f_sens_mst,
+                lower=t1, upper=Inf,
+                u=u,
+                t1=t1,
+                onset_sensitivity=onset_sensitivity,
+                clinical_sensitivity=clinical_sensitivity,
+                mean_sojourn_time=mean_sojourn_time)$value
+  }else{
+    f(u, t0, preonset_rate)*h(u, s, t1, onset_sensitivity, clinical_sensitivity, indolent_rate=indolent_rate)
+  }
 }
 
-prospective_sens_denom <- function(u, t1, t0, preonset_rate, mean_sojourn_time){
-  f(u, t0, preonset_rate)*(1-G(u, t1, mean_sojourn_time))
+prospective_sens_denom <- function(u, t1, t0, preonset_rate, mean_sojourn_time, indolent_rate=0){
+  if(indolent_rate==0){
+    f(u, t0, preonset_rate)*(1-G(u, t1, mean_sojourn_time))
+  }else{
+    f(u, t0, preonset_rate)
+  }
 }
 
 
@@ -343,8 +358,9 @@ prospective_sens <- function(start_age,
                              onset_sensitivity,
                              clinical_sensitivity,
                              preonset_rate,
-                             mean_sojourn_time){
-  prospective_sens_num_integral <-
+                             mean_sojourn_time,
+                             indolent_rate=0){
+  prospective_sens_num_integral_progressive <- (1-indolent_rate) *
     integrate(Vectorize(prospective_sens_num),
               lower=start_age, upper=screen_age,
               t1=screen_age,
@@ -353,16 +369,38 @@ prospective_sens <- function(start_age,
               clinical_sensitivity=clinical_sensitivity,
               preonset_rate=preonset_rate,
               mean_sojourn_time=mean_sojourn_time)$value
-  prospective_sens_denom_integral <-
+  prospective_sens_num_integral_indolent <- indolent_rate *
+    integrate(Vectorize(prospective_sens_num),
+              lower=start_age, upper=screen_age,
+              t1=screen_age,
+              t0=start_age,
+              onset_sensitivity=onset_sensitivity,
+              clinical_sensitivity=clinical_sensitivity,
+              preonset_rate=preonset_rate,
+              mean_sojourn_time=mean_sojourn_time,
+              indolent_rate=indolent_rate)$value
+  
+  prospective_sens_denom_integral_progressive <- (1-indolent_rate)*
     integrate(prospective_sens_denom,
               lower=start_age,
               upper=screen_age,
               t1=screen_age,
               t0=start_age,
-              preonset_rate=preonset_rate, mean_sojourn_time=mean_sojourn_time)$value
-  return(ifelse(prospective_sens_denom_integral==0,
+              preonset_rate=preonset_rate, 
+              mean_sojourn_time=mean_sojourn_time)$value
+  prospective_sens_denom_integral_indolent <- indolent_rate*
+    integrate(prospective_sens_denom,
+              lower=start_age,
+              upper=screen_age,
+              t1=screen_age,
+              t0=start_age,
+              preonset_rate=preonset_rate, 
+              mean_sojourn_time=mean_sojourn_time,
+              indolent_rate=indolent_rate)$value
+  
+  return(ifelse((prospective_sens_denom_integral_progressive+prospective_sens_denom_integral_indolent)==0,
                 onset_sensitivity,
-                prospective_sens_num_integral/prospective_sens_denom_integral))
+                (prospective_sens_num_integral_progressive+prospective_sens_num_integral_indolent)/(prospective_sens_denom_integral_progressive+prospective_sens_denom_integral_indolent)))
 }
 
 ##################################################
@@ -382,22 +420,24 @@ sens_compare <- function(N,
                          preonset_rate=0.1,
                          mean_sojourn_time,
                          onset_sensitivity=0.2,
-                         clinical_sensitivity=0.8){
+                         clinical_sensitivity=0.8,
+                         indolent_rate=0){
   analytic_sens <- prospective_sens(start_age,
                                     screen_age,
                                     onset_sensitivity,
                                     clinical_sensitivity,
                                     preonset_rate,
-                                    mean_sojourn_time)
+                                    mean_sojourn_time,
+                                    indolent_rate)
   sim_sens_tb <- prospective_test_sensitivity(N,
                                               start_age,
                                               preonset_rate,
                                               mean_sojourn_time,
-                                              indolent_rate=0,
+                                              indolent_rate=indolent_rate,
                                               test_age=screen_age,
                                               onset_sensitivity,
                                               clinical_sensitivity,
-                                              indolent_sensitivity=NULL)[[1]]
+                                              indolent_sensitivity=0.2)[[1]]
   sim_sens <- mean(sim_sens_tb$prosp_sens_all)
   return(list(tibble(analytic_sens, sim_sens)))
 }
@@ -414,13 +454,15 @@ sens_compare <- function(N,
 plot_sens_compare <- function(N,
                               test_age,
                               mean_sojourn_time,
+                              indolent_rate,
                               ext='png',
                               saveit=FALSE){
-  dset <- expand_grid(test_age, mean_sojourn_time)
-  dset <- dset %>% group_by(test_age, mean_sojourn_time)
+  dset <- expand_grid(test_age, mean_sojourn_time, indolent_rate)
+  dset <- dset %>% group_by(test_age, mean_sojourn_time, indolent_rate)
   dset <- dset %>% mutate(results=sens_compare(N=N,
                                                screen_age=test_age,
-                                               mean_sojourn_time=mean_sojourn_time))
+                                               mean_sojourn_time=mean_sojourn_time,
+                                               indolent_rate=indolent_rate))
   dset <- dset %>% unnest(results)
   dset <- dset %>% ungroup()
   dset <- dset %>% pivot_longer(cols=ends_with('sens'),
@@ -431,7 +473,7 @@ plot_sens_compare <- function(N,
   gg <- ggplot(dset, aes(x=test_age, y=sensitivity, color=type))
   # gg <- gg+geom_boxplot()
   gg <- gg+geom_line()
-  gg <- gg+facet_grid(.~mean_sojourn_time, labeller=label_both)
+  gg <- gg+facet_grid(indolent_rate~mean_sojourn_time, labeller=label_both)
   gg <- gg+xlab('Test age')
   gg <- gg+ylab('Sensitivity')
   gg <- gg+ylim(0,1)
@@ -531,7 +573,7 @@ plot_prospective_sensitivity_compare <- function(N,
   if(significant_cancer_only){
     dset <- dset %>% mutate(mean_prosp_sens=map(prosp_sens_all, ~mean(.x$prosp_sens_sig, na.rm=TRUE)))
     ylabel <- 'Prospective sensitivity for progressive cancer'
-  } else {
+  }else{
     dset <- dset %>% mutate(mean_prosp_sens=map(prosp_sens_all, ~mean(.x$prosp_sens_all)))
     ylabel <- 'Prospective sensitivity for any cancer'
   }
@@ -726,6 +768,7 @@ control <- function(N=10000,
   plot_sens_compare(N=1000,
                     test_age=seq(40, 70, 2),
                     mean_sojourn_time=c(2, 5, 10),
+                    indolent_rate=c(0, 0.2, 0.6),
                     ext=ext,
                     saveit=saveit)
 
@@ -741,6 +784,7 @@ control <- function(N=10000,
                                        preonset_rate=preonset_rate,
                                        onset_sensitivity=onset_sensitivity,
                                        clinical_sensitivity=clinical_sensitivity,
+                                       indolent_sensitivity=indolent_sensitivity,
                                        significant_cancer_only=FALSE,
                                        ext=ext,
                                        saveit=saveit)
