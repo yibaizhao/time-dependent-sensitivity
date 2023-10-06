@@ -57,7 +57,8 @@ library(rlang)
 # datestamp <- '2023-07-26'
 # datestamp <- '2023-07-31'
 # datestamp <- '2023-09-25'
-datestamp <- '2023-10-04'
+# datestamp <- '2023-10-04'
+datestamp <- '2023-10-06'
 
 set.seed(1234)
 
@@ -641,7 +642,7 @@ plot_prospective_sensitivity_compare <- function(N,
     confirmation_test_rate=factor(paste('Confirmation test\nfrequency/sensitivity', 
                                         sprintf('%2.0f%%', 100*confirmation_test_rate)),
                                   levels=paste('Confirmation test\nfrequency/sensitivity', 
-                                               sprintf('%2.0f%%', 100*sort(unique(dset$confirmation_test_rate), decreasing = TRUE)))
+                                               sprintf('%2.0f%%', 100*sort(unique(dset$confirmation_test_rate), decreasing=TRUE)))
                                   ))
   
   theme_set(theme_classic())
@@ -711,7 +712,7 @@ summary_stats <- function(dset,
                          start_age, 
                          onset_sensitivity,
                          clinical_sensitivity,
-                         preonset_ratealpha,
+                         preonset_rate,
                          alpha){
   # summary statistics
   sset <- 
@@ -747,14 +748,40 @@ summary_plot <- function(dset,
                          start_age, 
                          onset_sensitivity,
                          clinical_sensitivity,
-                         preonset_ratealpha,
-                         alpha=0.05){
+                         preonset_rate,
+                         alpha=0.05,
+                         ext,
+                         saveit){
   sset <- summary_stats(dset,
                 start_age, 
                 onset_sensitivity,
                 clinical_sensitivity,
-                preonset_ratealpha,
+                preonset_rate,
                 alpha)
+  
+  label_test_age <- paste0("Test age: ", unique(sset$test_age))
+  names(label_test_age) <- unique(sset$test_age)
+  label_indolent_rate <- paste0("Indolent rate: ", percent(unique(sset$indolent_rate)))
+  names(label_indolent_rate) <- unique(sset$indolent_rate)
+  gg1 <- 
+    ggplot(sset, aes(x=factor(mean_sojourn_time), y=prosp_sens, color=n)) +
+    geom_point() +  # Plot the mean values
+    geom_errorbar(aes(ymin=ci_lower, ymax=ci_upper), width=0.2) +  # Add error bars
+    facet_grid(test_age~indolent_rate, labeller=labeller(test_age=label_test_age,
+                                                         indolent_rate=label_indolent_rate)) +
+    scale_color_gradient(name="Group size", 
+                         low="lightgrey", 
+                         high="black") +
+    labs(y="Prospective sensitivity", x="Mean sojourn time") +
+    theme_update(strip.background=element_rect(colour=NA, fill=NA),
+                 strip.text=element_text(size=10)) +
+    theme_set(theme_classic())
+  print(gg1)
+  
+  if(saveit){
+    filename <- str_glue('fig_est_ci_{datestamp}.{ext}')
+    ggsave(plot=print(gg1), here('plot', filename), width=6, height=5)
+  }
 }
 
 ##################################################
@@ -823,7 +850,7 @@ control <- function(N=10000,
                                significant_cancer_only=TRUE,
                                ext=ext,
                                saveit=saveit)
-  # how does bias depend on confirmation test (mst 2, age 50, indolent_rate=0.2, confirmation test sensitivity = 1)?
+  # how does bias depend on confirmation test (mst 2, age 50, indolent_rate=0.2, confirmation test sensitivity=1)?
   dset <- expand_grid(test_age=50,
                       mean_sojourn_time=2,
                       indolent_rate=0,
@@ -843,7 +870,7 @@ control <- function(N=10000,
                                                                confirmation_test_sensitivity))
   dset <- dset %>% unnest(results)
   dset <- dset %>% ungroup()
-  ## how does bias depend on confirmation test rate (mst 2, age 50, indolent_rate=0.2, confirmation test sensitivity = 1)?
+  ## how does bias depend on confirmation test rate (mst 2, age 50, indolent_rate=0.2, confirmation test sensitivity=1)?
   dset_c_rate <- dset %>% filter(confirmation_test_sensitivity==1)
   dset_c_rate <- dset_c_rate %>% select(-c(test_age,
                                            mean_sojourn_time,
@@ -853,7 +880,7 @@ control <- function(N=10000,
                                clinical_sensitivity,
                                ext=ext,
                                saveit=saveit)
-  ## how does bias depend on confirmation test sensitivity (mst 2, age 50, indolent_rate=0.2, confirmation test rate = 1)?
+  ## how does bias depend on confirmation test sensitivity (mst 2, age 50, indolent_rate=0.2, confirmation test rate=1)?
   dset_c_sens <- dset %>% filter(confirmation_test_rate==1)
   dset_c_sens <- dset_c_sens %>% select(-c(test_age,
                                            mean_sojourn_time,
@@ -925,7 +952,15 @@ control <- function(N=10000,
                                        significant_cancer_only=FALSE,
                                        ext=ext,
                                        saveit=saveit)
-  
+  # Plot estimates and 95% CI
+  summary_plot(dset, 
+               start_age, 
+               onset_sensitivity,
+               clinical_sensitivity,
+               preonset_rate,
+               alpha=0.05,
+               ext,
+               saveit)
 }
 control(saveit=TRUE)
 
