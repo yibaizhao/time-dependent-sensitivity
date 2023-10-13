@@ -347,7 +347,7 @@ f_G <- function(u, t, t0, preonset_rate, mean_sojourn_time){
   f(u, preonset_rate)*(1-G(t, u, t0, mean_sojourn_time))
 }
 
-integral_h_g <- function(u, t, t0, onset_sensitivity, clinical_sensitivity, mean_sojourn_time, indolent){
+integral_h_g <- function(u, t, t0, preonset_rate, onset_sensitivity, clinical_sensitivity, mean_sojourn_time, indolent){
   tp <- t0+u # preclinical onset time
   if(indolent){
     f(u, preonset_rate)*
@@ -376,8 +376,8 @@ integral_h_g <- function(u, t, t0, onset_sensitivity, clinical_sensitivity, mean
 
 prospective_sens_num <- function(t, t0,
                                  preonset_rate,
-                                 onset_sensitivity, 
-                                 clinical_sensitivity, 
+                                 onset_sensitivity,
+                                 clinical_sensitivity,
                                  mean_sojourn_time,
                                  indolent_rate){
   prospective_sens_num_integral_progressive <- (1-indolent_rate) *
@@ -385,6 +385,7 @@ prospective_sens_num <- function(t, t0,
               lower=0, upper=t-t0,
               t=t,
               t0=t0,
+              preonset_rate=preonset_rate,
               onset_sensitivity=onset_sensitivity,
               clinical_sensitivity=clinical_sensitivity,
               mean_sojourn_time=mean_sojourn_time,
@@ -394,6 +395,7 @@ prospective_sens_num <- function(t, t0,
               lower=0, upper=t-t0,
               t=t,
               t0=t0,
+              preonset_rate=preonset_rate,
               onset_sensitivity=onset_sensitivity,
               clinical_sensitivity=clinical_sensitivity,
               mean_sojourn_time=mean_sojourn_time,
@@ -425,7 +427,9 @@ prospective_sens_analyt <- function(start_age,
                              mean_sojourn_time,
                              onset_sensitivity,
                              clinical_sensitivity,
-                             indolent_rate){
+                             indolent_rate,
+                             confirmation_test_rate=1,
+                             confirmation_test_sensitivity=1){
   
   numerator <- prospective_sens_num(t=test_age, 
                                     t0=start_age,
@@ -441,7 +445,7 @@ prospective_sens_analyt <- function(start_age,
                                         mean_sojourn_time=mean_sojourn_time, 
                                         indolent_rate=indolent_rate)    
     
-  return(numerator/denomerator)
+  return(confirmation_test_rate*confirmation_test_sensitivity*numerator/denomerator)
 }
 
 ##################################################
@@ -462,14 +466,20 @@ sens_compare <- function(N,
                          mean_sojourn_time,
                          onset_sensitivity,
                          clinical_sensitivity,
-                         indolent_rate){
+                         indolent_rate,
+                         confirmation_test_rate,
+                         confirmation_test_sensitivity
+  ){
   analytic_sens <- prospective_sens_analyt(start_age=start_age,
                                     test_age=test_age,
                                     preonset_rate=preonset_rate,
                                     mean_sojourn_time=mean_sojourn_time,
                                     onset_sensitivity=onset_sensitivity,
                                     clinical_sensitivity=clinical_sensitivity,
-                                    indolent_rate=indolent_rate)
+                                    indolent_rate=indolent_rate,
+                                    confirmation_test_rate=confirmation_test_rate,
+                                    confirmation_test_sensitivity=confirmation_test_sensitivity)
+  
   sim_sens_tb <- prospective_test_sensitivity(N=N,
                                               start_age=start_age,
                                               preonset_rate=preonset_rate,
@@ -477,7 +487,9 @@ sens_compare <- function(N,
                                               indolent_rate=indolent_rate,
                                               test_age=test_age,
                                               onset_sensitivity=onset_sensitivity,
-                                              clinical_sensitivity=clinical_sensitivity)[[1]]
+                                              clinical_sensitivity=clinical_sensitivity,
+                                              confirmation_test_rate=confirmation_test_rate,
+                                              confirmation_test_sensitivity=confirmation_test_sensitivity)[[1]]
   sim_sens <- mean(sim_sens_tb$prosp_sens_all)
   return(list(tibble(analytic_sens, sim_sens)))
 }
@@ -491,26 +503,40 @@ sens_compare <- function(N,
 ## ext: figure filename extension
 ## saveit: logical indicator of whether to save plot
 ##################################################
-plot_sens_compare <- function(N,
-                              start_age,
-                              test_age,
-                              preonset_rate,
-                              mean_sojourn_time,
-                              onset_sensitivity,
-                              clinical_sensitivity,
-                              indolent_rate,
+plot_sens_compare <- function(N=1000,
+                              start_age=40,
+                              test_age=seq(40, 70, 2),
+                              preonset_rate=0.1,
+                              mean_sojourn_time=c(2, 5, 10),
+                              onset_sensitivity=0.2,
+                              clinical_sensitivity=0.8,
+                              indolent_rate=c(0, 0.2, 0.6),
+                              confirmation_test_rate=1,
+                              confirmation_test_sensitivity=1,
+    # N,
+    #                           start_age,
+    #                           test_age,
+    #                           preonset_rate,
+    #                           mean_sojourn_time,
+    #                           onset_sensitivity,
+    #                           clinical_sensitivity,
+    #                           indolent_rate,
+    #                           confirmation_test_rate=1,
+    #                           confirmation_test_sensitivity=1,
                               ext='png',
                               saveit=FALSE){
-  dset <- expand_grid(test_age, mean_sojourn_time, indolent_rate)
-  dset <- dset %>% group_by(test_age, mean_sojourn_time, indolent_rate)
-  dset <- dset %>% mutate(results=sens_compare(N=!!N,
-                                               start_age=!!start_age,
+  dset <- expand_grid(test_age, mean_sojourn_time, indolent_rate, confirmation_test_rate, confirmation_test_sensitivity)
+  dset <- dset %>% group_by(test_age, mean_sojourn_time, indolent_rate, confirmation_test_rate, confirmation_test_sensitivity)
+  dset <- dset %>% mutate(results=sens_compare(N=N,
+                                               start_age=start_age,
                                                test_age=test_age,
-                                               preonset_rate=!!preonset_rate,
+                                               preonset_rate=preonset_rate,
                                                mean_sojourn_time=mean_sojourn_time,
-                                               onset_sensitivity=!!onset_sensitivity,
-                                               clinical_sensitivity=!!clinical_sensitivity,
-                                               indolent_rate=indolent_rate))
+                                               onset_sensitivity=onset_sensitivity,
+                                               clinical_sensitivity=clinical_sensitivity,
+                                               indolent_rate=indolent_rate,
+                                               confirmation_test_rate=confirmation_test_rate,
+                                               confirmation_test_sensitivity=confirmation_test_sensitivity))
   dset <- dset %>% unnest(results)
   dset <- dset %>% ungroup()
   dset <- dset %>% pivot_longer(cols=ends_with('sens'),
@@ -518,8 +544,9 @@ plot_sens_compare <- function(N,
   # dset$test_age <- factor(dset$test_age)
   theme_set(theme_classic())
   theme_update(axis.ticks.length=unit(0.2, 'cm'))
-  gg <- ggplot(dset, aes(x=test_age, y=sensitivity, color=type))
-  # gg <- gg+geom_boxplot()
+  # compare indolent rate and mean sojourn time
+  gg <- dset %>% filter(confirmation_test_rate==1, confirmation_test_sensitivity==1) %>% 
+    ggplot(aes(x=test_age, y=sensitivity, color=type))
   gg <- gg+geom_line()
   gg <- gg+facet_grid(indolent_rate~mean_sojourn_time, labeller=label_both)
   gg <- gg+xlab('Test age')
@@ -529,6 +556,22 @@ plot_sens_compare <- function(N,
   gg <- gg+scale_color_discrete(labels=c('Analytic', 'Simulation'))
   gg <- gg+theme(legend.position='bottom')
   print(gg)
+  
+  if((length(confirmation_test_rate)+length(confirmation_test_sensitivity))>2){
+    gg2 <- dset %>% filter(indolent_rate==0, test_age==50) %>%
+      ggplot(aes(x=test_age, y=sensitivity, color=type))
+    # gg <- gg+geom_boxplot()
+    gg2 <- gg2+geom_line()
+    gg2 <- gg2+facet_grid(confirmation_test_rate~confirmation_test_sensitivity, labeller=label_both)
+    gg2 <- gg2+xlab('Test age')
+    gg2 <- gg2+ylab('Sensitivity')
+    gg2 <- gg2+ylim(0,1)
+    gg2 <- gg2+guides(color=guide_legend(title='Types of prospective sensitivity'))
+    gg2 <- gg2+scale_color_discrete(labels=c('Analytic', 'Simulation'))
+    gg2 <- gg2+theme(legend.position='bottom')
+    print(gg2)
+  }
+  # compare confirmation test
 
   if(saveit){
     filename <- str_glue('fig_sens_compare_{datestamp}.{ext}')
@@ -536,8 +579,16 @@ plot_sens_compare <- function(N,
            plot=gg,
            width=6,
            height=5)
+    if((length(confirmation_test_rate)+length(confirmation_test_sensitivity))>2){
+      filename2 <- str_glue('fig_sens_confirmation_compare_{datestamp}.{ext}')
+      ggsave(here('plot', filename2),
+             plot=gg2,
+             width=6,
+             height=5)
+    }
   }
 }
+
 
 ##################################################
 # Visualize bias in true sensitivity obtained in
@@ -900,9 +951,24 @@ control <- function(N=10000,
                     onset_sensitivity=0.2,
                     clinical_sensitivity=0.8,
                     indolent_rate=c(0, 0.2, 0.6),
+                    confirmation_test_rate=1,
+                    confirmation_test_sensitivity=1,
                     ext=ext,
                     saveit=saveit)
-
+  ## adding confirmation test
+  plot_sens_compare(N=1000,
+                    start_age=40,
+                    test_age=seq(40, 70, 2),
+                    preonset_rate=0.1,
+                    mean_sojourn_time=c(2, 5, 10),
+                    onset_sensitivity=0.2,
+                    clinical_sensitivity=0.8,
+                    indolent_rate=c(0, 0.2, 0.6),
+                    confirmation_test_rate=c(0.6, 0.8, 1),
+                    confirmation_test_sensitivity=c(0.4, 0.6, 1),
+                    ext=ext,
+                    saveit=saveit)
+  
   # compare different settings using analytic model
   dset <- expand_grid(test_age=c(50, 60, 70),
                       mean_sojourn_time,
