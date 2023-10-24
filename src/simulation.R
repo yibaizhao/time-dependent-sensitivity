@@ -58,7 +58,8 @@ library(rlang)
 # datestamp <- '2023-07-31'
 # datestamp <- '2023-09-25'
 # datestamp <- '2023-10-04'
-datestamp <- '2023-10-06'
+# datestamp <- '2023-10-06'
+datestamp <- '2023-10-17'
 
 set.seed(1234)
 
@@ -687,17 +688,18 @@ plot_prospective_sensitivity_compare <- function(N,
                           test_age=factor(test_age),
                           mean_sojourn_time=factor(mean_sojourn_time),
                           indolent_rate=paste('Indolent\nfraction', sprintf('%2.0f%%', 100*indolent_rate)),
-                          indolent_rate=factor(indolent_rate),
-                          confirmation_test_sensitivity=paste('Confirmation test\nsensitivity', sprintf('%2.0f%%', 100*confirmation_test_sensitivity)),
-                          confirmation_test_sensitivity=factor(confirmation_test_sensitivity,
-                                                              levels=c('Confirmation test\nsensitivity 100%',
-                                                                       'Confirmation test\nsensitivity 80%',
-                                                                       'Confirmation test\nsensitivity 60%')))
+                          indolent_rate=factor(indolent_rate)
+                          # confirmation_test_sensitivity=paste('Confirmation test\nsensitivity', sprintf('%2.0f%%', 100*confirmation_test_sensitivity)),
+                          # confirmation_test_sensitivity=factor(confirmation_test_sensitivity,
+                          #                                     levels=c('Confirmation test\nsensitivity 60%',
+                          #                                              'Confirmation test\nsensitivity 80%',
+                          #                                              'Confirmation test\nsensitivity 100%'))
+                          )
   dset <- dset %>% mutate( 
     confirmation_test_rate=factor(paste('Confirmation test\nfrequency/sensitivity', 
                                         sprintf('%2.0f%%', 100*confirmation_test_rate)),
                                   levels=paste('Confirmation test\nfrequency/sensitivity', 
-                                               sprintf('%2.0f%%', 100*sort(unique(dset$confirmation_test_rate), decreasing=TRUE)))
+                                               sprintf('%2.0f%%', 100*sort(unique(dset$confirmation_test_rate), decreasing=FALSE)))
                                   ))
   
   theme_set(theme_classic())
@@ -712,16 +714,16 @@ plot_prospective_sensitivity_compare <- function(N,
                         y=mean_prosp_sens,
                         fill=mean_sojourn_time),
                     stat='identity',
-                    position=position_dodge(width=1))
-  gg <- gg+geom_linerange(aes(xmin=test_age,
+                    position=position_dodge2(width=1))
+  gg <- gg+geom_linerange(aes(#xmin=test_age,
                               ymin=mean_prosp_sens,
                               x=test_age,
-                              y=mean_prosp_sens,
-                              xmax=test_age,
+                              #y=mean_prosp_sens,
+                              #xmax=test_age,
                               ymax=clinical_sensitivity,
                               color=mean_sojourn_time),
                           alpha=0.3,
-                          position=position_dodge(width=1))
+                          position=position_dodge2(width=1))
   gg <- gg+geom_label(aes(x=test_age,
                           y=mean_prosp_sens+degradation/2,
                           label=sprintf('-%2.0f%%', 100*degradation),
@@ -740,8 +742,14 @@ plot_prospective_sensitivity_compare <- function(N,
                               breaks=seq(0, 1, by=0.2),
                               labels=label_percent(accuracy=1),
                               expand=c(0, 0))
-  gg <- gg+scale_color_viridis(name='Mean sojourn\ntime (years)', discrete=TRUE)
-  gg <- gg+scale_fill_viridis(name='Mean sojourn\ntime (years)', discrete=TRUE)
+  # gg <- gg+scale_color_viridis(name='Mean sojourn\ntime (years)', discrete=TRUE)
+  # gg <- gg+scale_fill_viridis(name='Mean sojourn\ntime (years)', discrete=TRUE)
+  gg <- gg+scale_color_manual(name = 'Mean sojourn\ntime (years)',
+                             values = setNames(c("grey10", "grey40", "grey70"), 
+                                               levels(dset$mean_sojourn_time)))
+  gg <- gg+scale_fill_manual(name = 'Mean sojourn\ntime (years)',
+                             values = setNames(c("grey10", "grey40", "grey70"), 
+                                               levels(dset$mean_sojourn_time)))
   print(gg)
   if(saveit){
     filename <- str_glue('plot_compare_setting_{method}_{datestamp}.{ext}')
