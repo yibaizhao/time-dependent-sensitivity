@@ -102,9 +102,15 @@ observed.data.hmm<-function(obs.times,underlying.states,emission.matrix){
 }
 
 
-get.dx=function(rate.matrix,start.dist,screen.times,post.screen.lookout,clinical.cancer.state,pre.clinical.cancer.state){
+get.dx=function(rate.matrix,
+                start.dist,
+                screen.times,
+                post.screen.lookout,
+                clinical.cancer.state,
+                pre.clinical.cancer.state,
+                multiple.tests=TRUE){
   ###################################################################################################
-  #Author JL
+  #Author YZ&JL
   # This function ascertains whether a person is screen or interval detected during a series of screens
   # INPUTS: rate.matrix=transition matrix of cancer model
   #         start.dist=starting probability distribution for cancer model
@@ -119,51 +125,65 @@ get.dx=function(rate.matrix,start.dist,screen.times,post.screen.lookout,clinical
   #  browser()
     nstates=dim(rate.matrix)[1]
     thetimes=c(screen.times,max(screen.times)+post.screen.lookout)
+    
     # generate true natural history
     the.start.state=sample(1:nstates,size=1,prob=start.dist)
     outctmc=sim.ctmc(start.state=the.start.state,rate.matrix=rate.matrix, 
                    end.time=1000,start.time=0,absorbing.state=clinical.cancer.state)
-    sojourn_time <- outctmc$times[3]-outctmc$times[2]
+    sojourn_time <- outctmc$times[clinical.cancer.state]-outctmc$times[pre.clinical.cancer.state]
+    
+    # generate the true state at observe time
     discreteout=discrete.ctmc(ctmc.times = outctmc$times,ctmc.states=outctmc$states,obs.times=thetimes)
+    
     # generate observed state at observe time
     # get the total number of cores
     numOfCores <- detectCores()
     # register all the cores
     registerDoParallel(numOfCores) 
     obsout <- foreach(t=discreteout$obs.times, .combine=rbind) %dopar%  {
-    # for(t in discreteout$obs.times){
       t.state=discreteout$states[discreteout$obs.times==t]
       sensitivity <- test_sensitivity(sojourn_time=sojourn_time,
                                       onset_sensitivity=0.2,
                                       clinical_sensitivity=0.8,
                                       is_indolent=FALSE,
-                                      time=t-outctmc$times[2], # test time-preclinical onset time
+                                      time=t-outctmc$times[pre.clinical.cancer.state], # test time-preclinical onset time
                                       method='linear')$sensitivity
-      sensitivity <- ifelse(sensitivity<0, 0, sensitivity)
       # print(paste("t=", t, ", state=", t.state, ", sens=", sensitivity))
       emission.mat=diag(x=1,nrow=nstates,ncol=nstates)
       emission.mat[pre.clinical.cancer.state,pre.clinical.cancer.state]=sensitivity
       emission.mat[pre.clinical.cancer.state,1]=1-sensitivity
-      dset <- observed.data.hmm(obs.times=t,underlying.states=t.state,emission.matrix = emission.mat)
-      dset$true.sens <- ifelse(sensitivity==0, NA, sensitivity)
-      dset
+      dset_obs <- observed.data.hmm(obs.times=t,underlying.states=t.state,emission.matrix = emission.mat)
+      dset_obs$true.sens <- ifelse(sensitivity==0, NA, sensitivity)
+      dset_obs
     }
-    #obtain 1=no cancer detected, 2=screen, 3=interval
+    obsout$state <- discreteout$states
+    
+    # obtain 1=no cancer detected, 2=screen, 3=interval
     obsout$result <- NA
     for(t in screen.times){
-      t_check <- t+post.screen.lookout
-      obsout_t <- obsout %>% filter(obs.times<=t_check)
+      t_post <- t+post.screen.lookout
+      obsout_t <- obsout %>% filter(obs.times %in% c(t, t_post))
+      ## state 1 otherwise
       result=1
-      result[clinical.cancer.state%in%obsout_t$obs.data&!(obsout_t$obs.data[1]==clinical.cancer.state)]=3
-      result[pre.clinical.cancer.state%in%head(obsout_t$obs.data,-1)]=2
+      ## state 3: if test time is negative, post screen time is state 3; OR test time already state 3
+      result[(obsout_t$obs.data[1]==1 & obsout_t$obs.data[2]==clinical.cancer.state) | obsout_t$obs.data[1]==clinical.cancer.state]=3
+      ## state 2: if none of above and test time is state 2
+      result[obsout_t$obs.data[1]==pre.clinical.cancer.state]=2
       obsout$result[obsout$obs.times==t] <- result
+    }
+    if(multiple.tests){
+      # censored once screen detected or interval cancer
+      ## find time first detected or diagnosed
+      stop_time <- obsout$obs.times[min(which(obsout$result %in% c(pre.clinical.cancer.state, clinical.cancer.state)))]
+      obsout$result[obsout$obs.times>stop_time] <- NA
+      obsout$true.sens[obsout$obs.times>stop_time] <- NA
     }
     return(obsout %>% filter(obs.times %in% screen.times))
 }
 
 
 ###################################################################################################
-#Author JL
+#Author YZ&JL
 # This function ascertains the empirical.sensitivity after a series of screens, using a simulation approach
 #empirical sensitvity is defined as the fraction of all cancers that are screeen detected=screen/(screen +interval)
 # INPUTS: rate.matrix=transition matrix of cancer model
@@ -177,28 +197,40 @@ get.dx=function(rate.matrix,start.dist,screen.times,post.screen.lookout,clinical
 #
 #################################################################################################
 
-empirical.sensitivity.simulation<-function(rate.matrix,start.dist,screen.times,post.screen.lookout,clinical.cancer.state,pre.clinical.cancer.state,
-                                nreps){
+empirical.sensitivity.simulation <- function(seed=123, 
+                                             rate.matrix,
+                                             start.dist,
+                                             screen.times,
+                                             post.screen.lookout,
+                                             clinical.cancer.state,
+                                             pre.clinical.cancer.state,
+                                             nreps,
+                                             multiple.tests){
   
   # out=replicate(n=nreps,get.dx(sensitivity=sensitivity,rate.matrix=rate.matrix,start.dist=start.dist,screen.times=screen.times,
   #                clinical.cancer.state=clinical.cancer.state,
   #               pre.clinical.cancer.state=pre.clinical.cancer.state,post.screen.lookout),simplify=T)
+  set.seed(seed)
   # get the total number of cores
   numOfCores <- detectCores()
   # register all the cores
   registerDoParallel(numOfCores) 
   out <- foreach(id=1:nreps, .combine=rbind) %dopar%  {
-    dset <- get.dx(rate.matrix=rate.matrix,start.dist=start.dist,screen.times=screen.times,
-           clinical.cancer.state=clinical.cancer.state,
-           pre.clinical.cancer.state=pre.clinical.cancer.state,post.screen.lookout)
+    dset <- get.dx(rate.matrix=rate.matrix,
+                   start.dist=start.dist,
+                   screen.times=screen.times,
+                   clinical.cancer.state=clinical.cancer.state,
+                   pre.clinical.cancer.state=pre.clinical.cancer.state,
+                   post.screen.lookout=post.screen.lookout,
+                   multiple.tests=multiple.tests)
     dset$id <- id
     dset
   }
 
   out_sens <- out %>%
     group_by(obs.times) %>%
-    summarise(screen=sum(result==2),
-              interval=sum(result==3),
+    summarise(screen=sum(result==2, na.rm=TRUE),
+              interval=sum(result==3, na.rm=TRUE),
               empirical_sensitivity=screen/(screen+interval),
               mean_true_sensitivity=mean(true.sens, na.rm = T))
   return(out_sens)
