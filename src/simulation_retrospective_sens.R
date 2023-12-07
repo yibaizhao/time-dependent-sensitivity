@@ -1,7 +1,8 @@
 library(tidyverse)
 library(ggplot2)
 
-datestamp <- "2023-11-30"
+# datestamp <- "2023-11-30"
+datestamp <- "2023-12-05"
 
 set.seed(1234)
 
@@ -68,7 +69,7 @@ retrospective_test_sensitivity <- function(N,
                  sojourn_time = rexp(N, rate = 1/mean_sojourn_time),
                  clinical_age = onset_age + sojourn_time)
   # find cases that clinically diagnosed at test age
-  cset <- dset %>% filter(clinical_age <= retro_age)
+  cset <- dset %>% filter(clinical_age <= retro_age & clinical_age > sample_age)
   # estimate screen sensitivity at sample time
   cset <- cset %>%
     mutate(screen_sens = test_sensitivity(sojourn_time = sojourn_time,
@@ -118,11 +119,22 @@ plot_prospective_sensitivity <- function(N,
                                                        retro_age = retro_age,
                                                        onset_sensitivity = !!onset_sensitivity,
                                                        clinical_sensitivity = !!clinical_sensitivity,
-                                                       specificity = !!specificity)) %>%
+                                                       specificity = !!specificity),
+           retro_sens_analytic = analytic_prospective_sens(t0 = start_age, 
+                                                           t = retro_age-sample_window, 
+                                                           t2 = retro_age, 
+                                                           preonset_rate = preonset_rate,
+                                                           mean_sojourn_time = mean_sojourn_time, 
+                                                           onset_sensitivity = !!onset_sensitivity, 
+                                                           clinical_sensitivity = !!clinical_sensitivity,
+                                                           specificity = !!specificity)) %>%
     ungroup()
   
+  sset <- sset %>% pivot_longer(cols = c("retro_sens", "retro_sens_analytic"),
+                                values_to = "Retrospective sensitivity",
+                                names_to = "Method")
   sset %>%
-    ggplot(aes(x = start_age + sample_window, y = retro_sens)) +
+    ggplot(aes(x = retro_age - sample_window, y = `Retrospective sensitivity`, color = Method)) +
     geom_point() +
     geom_line() +
     scale_x_continuous(breaks = retro_age-sample_window_seq) +    
@@ -132,6 +144,109 @@ plot_prospective_sensitivity <- function(N,
     ylim(0, 1)
 }
 
+##################################################
+# Mathematical formula of retrospective sensitivity
+## t0: initial time
+## t_p: pre-clinical onset time
+## t_c: clinical onset time
+## t2: clinical check time
+## f(u): onset time ~ exp(rate)
+## g(s): sojourn time ~ exp(1/mst), mst=mean sojourn time
+##################################################
+f <- function(t_p, t0, preonset_rate){
+  u <- t_p-t0
+  preonset_rate*exp(-preonset_rate*u)
+}
+
+g <- function(t_c, t_p, mean_sojourn_time){
+  s <- t_c-t_p
+  1/mean_sojourn_time*exp(-1/mean_sojourn_time*s)
+}
+
+# true screening sensitivity function
+h <- function(t_c, t_p, t, onset_sensitivity, clinical_sensitivity){
+  # sojourn time
+  s <- t_c-t_p
+  # progressive case
+  alpha <- onset_sensitivity
+  beta <- (clinical_sensitivity-onset_sensitivity)/s
+  sensitivity <- alpha+beta*(t-t_p)
+  sensitivity <- ifelse(sensitivity<=clinical_sensitivity, sensitivity, NA)
+  
+  return(sensitivity)
+}
+
+# inner integral
+h_g <- function(t_c, t_p, t, mean_sojourn_time, onset_sensitivity, clinical_sensitivity){
+  h(t_c, t_p, t, onset_sensitivity, clinical_sensitivity) * g(t_c, t_p, mean_sojourn_time)
+}
+
+integral_h_g <- function(t_p, t0, t, t2, 
+                         preonset_rate, mean_sojourn_time, 
+                         onset_sensitivity, clinical_sensitivity){
+  f(t_p, t0, preonset_rate)*
+    integrate(Vectorize(h_g),
+              lower = t, upper = t2,
+              t_p=t_p, 
+              t = t, 
+              mean_sojourn_time = mean_sojourn_time, 
+              onset_sensitivity = onset_sensitivity, 
+              clinical_sensitivity = clinical_sensitivity)$value
+}
+
+integral_g <- function(t_p, t0, t, t2, 
+                      preonset_rate, mean_sojourn_time,
+                      denominator = FALSE){
+  if(denominator){
+    f(t_p, t0, preonset_rate)*
+      integrate(Vectorize(g),
+                lower = t, upper = t2,
+                t_p = t_p, 
+                mean_sojourn_time = mean_sojourn_time)$value
+  }else{
+    f(t_p, t0, preonset_rate)*
+      integrate(Vectorize(g),
+                lower = t_p, upper = t2,
+                t_p = t_p, 
+                mean_sojourn_time = mean_sojourn_time)$value
+  }
+}
+
+analytic_prospective_sens <- function(t0, t, t2,
+                                      preonset_rate, mean_sojourn_time, 
+                                      onset_sensitivity, clinical_sensitivity, 
+                                      specificity = 0.9){
+  true_pos <- integrate(Vectorize(integral_h_g),
+                        lower = t0, upper = t,
+                        t0 = t0, 
+                        t = t, 
+                        t2 = t2, 
+                        preonset_rate = preonset_rate, 
+                        mean_sojourn_time = mean_sojourn_time, 
+                        onset_sensitivity = onset_sensitivity, 
+                        clinical_sensitivity = clinical_sensitivity)$value
+  
+  false_pos <- specificity * integrate(Vectorize(integral_g),
+                                       lower = t, upper = t2,
+                                       t0 = t0, 
+                                       t = t, 
+                                       t2 = t2, 
+                                       preonset_rate = preonset_rate, 
+                                       mean_sojourn_time = mean_sojourn_time)$value
+  
+  numerator <- true_pos + false_pos
+  
+  denominator <- integrate(Vectorize(integral_g),
+                            lower = t0, upper = t2,
+                            t0 = t0, 
+                            t = t, 
+                            t2 = t2, 
+                            preonset_rate = preonset_rate, 
+                            mean_sojourn_time = mean_sojourn_time,
+                            denominator = TRUE)$value
+  
+  return(numerator/denominator)
+}
 
 control <- function(N=1000,
                     preonset_rate=0.1,
