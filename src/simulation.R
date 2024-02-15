@@ -76,7 +76,7 @@ test_sensitivity <- function(sojourn_time,
                              onset_sensitivity,
                              clinical_sensitivity,
                              is_indolent=FALSE,
-                             time=seq(0, 20),
+                             time=seq(0, sojourn_time, length=20),
                              method='linear'){
   # alpha=log(1/onset_sensitivity-1)
   # beta=1/sojourn_time*(log(1/clinical_sensitivity-1)-alpha)
@@ -238,6 +238,71 @@ plot_test_sensitivity_stage <- function(sojourn_time=tibble(early=seq(2, 10, by=
   print(gg)
   if(saveit){
     filename <- str_glue('prospective_sensitivity_{datestamp}.{ext}')
+    ggsave(here('plot', filename),
+           plot=gg,
+           height=6,
+           width=6)
+  }
+}
+
+plot_test_sensitivity_stage_experiment <- function(mst=c(etoc=6, etol=4),
+                                                   onset_sensitivity=0,
+                                                   clinical_sensitivity=c(early=0.4, late=0.8),
+                                                   size=1000,
+                                                   ext='png',
+                                                   saveit=FALSE){
+  eset <- tibble(sojourn_time=rexp(size, rate=1/mst['etoc']))
+  eset <- eset %>% mutate(clinical_stage='early',
+                          sensitivity=map(sojourn_time,
+                                          test_sensitivity,
+                                          onset_sensitivity,
+                                          clinical_sensitivity['early']))
+  eset <- eset %>% unnest(sensitivity)
+  lset <- tibble(sojourn_time=rexp(size, rate=1/mst['etol']))
+  lset <- lset %>% mutate(clinical_stage='late',
+                          sensitivity=map(sojourn_time,
+                                          test_sensitivity,
+                                          onset_sensitivity,
+                                          clinical_sensitivity['late']))
+  lset <- lset %>% unnest(sensitivity)
+  sset <- bind_rows(eset, lset)
+  cset <- sset %>% group_by(clinical_stage)
+  cset <- cset %>% summarize(min=min(sojourn_time),
+                             max=max(sojourn_time))
+  cset <- cset %>% mutate(sensitivity=clinical_sensitivity[clinical_stage])
+  theme_set(theme_classic())
+  theme_update(axis.ticks.length=unit(0.2, 'cm'),
+               legend.position='bottom')
+  gg <- ggplot(sset)
+  gg <- gg+geom_hline(yintercept=clinical_sensitivity, linetype='dashed')
+  gg <- gg+geom_line(aes(x=time,
+                         y=sensitivity,
+                         group=interaction(clinical_stage, sojourn_time),
+                         color=clinical_stage),
+                     alpha=0.5,
+                     linewidth=0.25)
+  gg <- gg+geom_segment(data=cset,
+                        aes(x=min,
+                            xend=max,
+                            y=sensitivity,
+                            yend=sensitivity),
+                        alpha=0.9,
+                        linewidth=1.5)
+  gg <- gg+scale_x_continuous(name='Years since onset',
+                              limits=c(0, max(cset$max)),
+                              breaks=seq(0, max(cset$max), by=2))
+  gg <- gg+scale_y_continuous(name='Sensitivity',
+                              limits=c(0, 1),
+                              breaks=seq(0, 1, by=0.1),
+                              labels=label_percent(accuracy=1),
+                              expand=c(0, 0))
+  gg <- gg+scale_color_viridis(name='Clinical stage',
+                               discrete=TRUE,
+                               begin=0.65,
+                               end=0.25)
+  print(gg)
+  if(saveit){
+    filename <- str_glue('prospective_sensitivity_experiment_{datestamp}.{ext}')
     ggsave(here('plot', filename),
            plot=gg,
            height=6,
@@ -931,12 +996,20 @@ control <- function(N=10000,
   #                      saveit=saveit)
 
   # visualize how test sensitivity depends on clinical stage
-  plot_test_sensitivity_stage(sojourn_time=tibble(early=seq(2, 6),
-                                                  late=seq(6, 10)),
-                              onset_sensitivity=0,
-                              clinical_sensitivity=c(early=0.3, late=0.8),
-                              ext=ext,
-                              saveit=saveit)
+  #plot_test_sensitivity_stage(sojourn_time=tibble(early=seq(2, 6),
+  #                                                late=seq(6, 10)),
+  #                            onset_sensitivity=0,
+  #                            clinical_sensitivity=c(early=0.3, late=0.8),
+  #                            ext=ext,
+  #                            saveit=saveit)
+
+  # visualize how test sensitivity depends on clinical stage
+  plot_test_sensitivity_stage_experiment(mst=c(etoc=6, etol=4),
+                                         onset_sensitivity=0,
+                                         clinical_sensitivity=c(early=0.3, late=0.8),
+                                         ext=ext,
+                                         saveit=saveit)
+  stop()
 
   # simulate natural histories
   dset <- expand_grid(test_age, mean_sojourn_time, indolent_rate)
