@@ -89,7 +89,8 @@ test_sensitivity <- function(sojourn_time,
       tset <- tibble(time=time, sensitivity=1/(1+exp(-(alpha+beta/sojourn_time*time))))
     }
     tset <- tset %>%
-      mutate(sensitivity=ifelse(sensitivity<=clinical_sensitivity, sensitivity, NA))
+      mutate(sensitivity=ifelse(sensitivity<=clinical_sensitivity, sensitivity, NA),
+             sensitivity=ifelse(time<0|time>sojourn_time, NA, sensitivity))
   }else{
     tset <- tibble(time=time, 
                    sensitivity=onset_sensitivity+(clinical_sensitivity-onset_sensitivity)*(1-exp(-1/sojourn_time*time)))
@@ -218,7 +219,7 @@ prospective_test_sensitivity <- function(N,
   # ccheck <- cset %>% with(all(retro_sens == clinical_sensitivity))
   # ccheck %>% stopifnot()
   # calculate true prospective test sensitivity among preclinical at test age
-  pset <- dset %>% filter(onset_age <= test_age & test_age < clinical_age)
+  pset <- dset %>% filter(onset_age <= !!test_age & !!test_age < clinical_age)
   pset <- pset %>% mutate(prosp_sens_all=test_sensitivity(sojourn_time=sojourn_time,
                                                       onset_sensitivity,
                                                       clinical_sensitivity,
