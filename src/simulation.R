@@ -59,8 +59,9 @@ library(rlang)
 # datestamp <- '2023-09-25'
 # datestamp <- '2023-10-04'
 # datestamp <- '2023-10-06'
-#datestamp <- '2023-10-17'
-datestamp <- '2024-02-14'
+# datestamp <- '2023-10-17'
+# datestamp <- '2024-02-14'
+datestamp <- '2024-02-15'
 
 set.seed(1234)
 
@@ -217,8 +218,7 @@ plot_test_sensitivity_stage <- function(sojourn_time=tibble(early=seq(2, 10, by=
                         aes(x=min,
                             xend=max,
                             y=sensitivity,
-                            yend=sensitivity,
-                            color=clinical_stage),
+                            yend=sensitivity),
                         alpha=0.9,
                         linewidth=2)
   gg <- gg+scale_x_continuous(name='Years since onset',
@@ -227,7 +227,7 @@ plot_test_sensitivity_stage <- function(sojourn_time=tibble(early=seq(2, 10, by=
                               expand=c(0, 0))
   gg <- gg+scale_y_continuous(name='Sensitivity',
                               limits=c(0, 1),
-                              breaks=seq(0, 1, by=0.2),
+                              breaks=seq(0, 1, by=0.1),
                               labels=label_percent(accuracy=1),
                               expand=c(0, 0))
   gg <- gg+scale_color_viridis(name='Clinical stage',
@@ -923,17 +923,17 @@ control <- function(N=10000,
                     ext='png',
                     saveit=FALSE){
   # visualize how test sensitivity increases over sojourn time
-  plot_test_sensitivity(sojourn_time=seq(2, 10, by=2),
-                        onset_sensitivity,
-                        clinical_sensitivity,
-                        ext=ext,
-                        saveit=saveit)
+  #plot_test_sensitivity(sojourn_time=seq(2, 10, by=2),
+  #                      onset_sensitivity,
+  #                      clinical_sensitivity,
+  #                      ext=ext,
+  #                      saveit=saveit)
 
   # visualize how test sensitivity depends on clinical stage
-  plot_test_sensitivity_stage(sojourn_time=tibble(early=seq(1, 8),
-                                                  late=seq(7, 14)),
-                              onset_sensitivity,
-                              clinical_sensitivity=c(early=0.4, late=0.8),
+  plot_test_sensitivity_stage(sojourn_time=tibble(early=seq(2, 6),
+                                                  late=seq(6, 10)),
+                              onset_sensitivity=0,
+                              clinical_sensitivity=c(early=0.3, late=0.8),
                               ext=ext,
                               saveit=saveit)
 
