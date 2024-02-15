@@ -6,6 +6,12 @@ library(msm)
 library(dplyr)
 library(foreach)
 library(doParallel)
+library(tidyverse)
+library(here)
+library(readr)
+library(ggplot2)
+
+datastamp <- '02-13-2024'
 
 ########################################################################################
 sim.ctmc<-function(start.state,rate.matrix, end.time,start.time=0,absorbing.state=0){
@@ -141,7 +147,7 @@ get.dx=function(rate.matrix,
   
   # generate observed state at observe time
   # get the total number of cores
-  numOfCores <- detectCores()
+  numOfCores <- detectCores() #- 2
   # register all the cores
   registerDoParallel(numOfCores) 
   obsout <- foreach(t=discreteout$obs.times, .combine=rbind) %dopar%  {
@@ -192,60 +198,189 @@ get.dx=function(rate.matrix,
   return(obsout %>% filter(obs.times %in% screen.times))
 }
 
-r = 0.2 # onset rate
-m_ec = 6 # mst from early stage to clinical
-m_el = 3 # mst from early stage to late stage
-m_lc = 1 # mst from late stage to clinical
-rate.matrix = matrix(c(-r, r, 0, 0, 
-                       0, -(1/m_ec + 1/m_el), 1/m_ec, 1/m_el,
-                       0, 0, -1/m_lc, 1/m_lc,
-                       0, 0, 0, 0),
-                     byrow = T, nrow = 4)
-screen.times = 1:10
-start.dist = c(1, 0, 0, 0)
-early.state = 2
-late.state = 3
-clinical.cancer.state = 4
-nstates=dim(rate.matrix)[1]
-
-# generate true natural history
-the.start.state=sample(1:nstates, size=1, prob=start.dist)
-# generate the true state at observe time
-discreteout=discrete.ctmc(ctmc.times = outctmc$times,
-                          ctmc.states=outctmc$states,
-                          obs.times=screen.times)
-
-set.seed(123)
-# get the total number of cores
-numOfCores <- detectCores()
-# register all the cores
-registerDoParallel(numOfCores) 
-dset_multistate <- foreach(id=1:1000, .combine=rbind) %dopar%  {
-  # generate true natural history
-  outctmc <- sim.ctmc(start.state=the.start.state, rate.matrix=rate.matrix, 
-                   end.time=1000, start.time=0, absorbing.state=clinical.cancer.state)
-  # generate the true state at observe time
-  discreteout <- discrete.ctmc(ctmc.times = outctmc$times,
-                            ctmc.states=outctmc$states,
-                            obs.times=screen.times)
-  # dset <- data.frame(id = id,
-  #                    times = outctmc$times,
-  #                    states = outctmc$states)
-  dset_obs <- data.frame(id = id,
-                         obs.times = discreteout$obs.times,
-                         states = discreteout$states)
-  dset_obs
+# function of true sensitivity at time t
+h <- function(t,
+              sojourn_time,
+              lower,
+              upper){
+  # t: time from preclincial onset
+  beta0 <- lower
+  beta1 <- (upper - lower)/sojourn_time
+  true_sens <- beta0 + beta1 * t
+  true_sens <- ifelse(true_sens<lower | true_sens>upper, NA, true_sens)
+  # true_sens <- pmax(lower, pmin(upper, true_sens))
+  return(true_sens)
 }
 
-get_obs <- function(dset,
-                    sens_es = 0.2,
-                    sens_ls = 0.8){
-  dset <- dset %>% mutate(sensitivity = case_when(states == early.state ~ sens_es,
-                                                  states == late.state ~ sens_ls,
-                                                  TRUE ~ NA
-                                                  ))
+
+sim_stage_prosp_sens <- function(test_time, 
+                                 dset,
+                                 include_es_ls = FALSE){
+  # find state at test time
+  dset <- dset %>%
+    filter(times < test_time) %>% # Keep rows where value is less than t
+    group_by(id) %>%
+    slice_max(order_by = times, n = 1) %>% # Select the last row
+    ungroup()
+  # select in early stage
+  dset <- dset %>% filter(states == 2)
+  # find true sensitivity at observe time                
+  dset <- dset %>%
+    mutate(sensitivity = NA,
+           # slope of early stage to clinical
+           sensitivity = ifelse(es_cl, 
+                                h(t = (test_time-preclinical_onset), 
+                                  sojourn_time = sojourn_time_slope,
+                                  lower = 0,
+                                  upper = 0.3),
+                                sensitivity), 
+           # slope of early stage to late stage
+           sensitivity = ifelse(!es_cl, 
+                                h(t = (test_time-preclinical_onset), 
+                                  sojourn_time = sojourn_time_slope,
+                                  lower = 0,
+                                  upper = 0.8),
+                                sensitivity)
+    )
+  # fraction of early state to clinical and early state to late stage transition
+  dset <- dset %>% mutate(frac_es_cl = mean(es_cl))
+  # filename <- str_glue("tbl_m1_{mst_es_cl}_m2_{mst_es_ls}_test_{test_time}_{datastamp}.csv")
+  # write_csv(dset, here("tables", filename))
+  dset <- read_csv(here("tables", filename))
+  
+  if(!include_es_ls){
+    dset <- dset %>% filter(es_cl)
+  }
+  return(c(sensitivity = mean(dset$sensitivity),
+              fraction = unique(dset$frac_es_cl)))
 }
 
+sim_sens <- function(N,
+                     test_time,
+                     pre_onset_rate,
+                     mst_es_cl,
+                     mst_es_ls,
+                     mst_ls_cl,
+                     saveit = TRUE){
+  rate.matrix = matrix(c(-pre_onset_rate, pre_onset_rate, 0, 0, 
+                         0, -(1/mst_es_cl + 1/mst_es_ls), 1/mst_es_ls, 1/mst_es_cl,
+                         0, 0, -1/mst_ls_cl, 1/mst_ls_cl,
+                         0, 0, 0, 0),
+                       byrow = T, nrow = 4)
+  start.dist = c(1, 0, 0, 0)
+  early.state = 2
+  late.state = 3
+  clinical.cancer.state = 4
+  
+  set.seed(123)
+  # get the total number of cores
+  numOfCores <- detectCores() #- 2
+  # register all the cores
+  registerDoParallel(numOfCores) 
+  dset_multistate <- foreach(id=1:N, .combine=rbind) %dopar%  {
+    # generate true natural history
+    outctmc <- sim.ctmc(start.state=1, rate.matrix=rate.matrix, 
+                        end.time=1000, start.time=0, absorbing.state=clinical.cancer.state)
+    dset <- data.frame(id = id,
+                       times = outctmc$times,
+                       states = outctmc$states)
+    dset <- dset %>% 
+      group_by(id) %>%
+      mutate(es_cl = all(states != 3)) %>%
+      ungroup()
+    # find preclinical onset
+    dset_pre <- dset %>% 
+      group_by(id) %>%
+      reframe(preclinical_onset = times[states==2])
+    dset <- dset %>% left_join(dset_pre)
+    # find sojourn time
+    dset <- dset %>% mutate(sojourn_time = (lead(times) - times))
+    # find sojourn time in slope, sojourn time of early stage and late stage
+    dset_slope <- dset %>% 
+      group_by(id) %>%
+      mutate(sojourn_time_slope = sojourn_time[states == 2]) %>%
+      ungroup()
+    dset <- dset %>% left_join(dset_slope)
+    
+    return(dset)
+  }
+  
+  if(saveit){
+    filename <- str_glue("tbl_m1_{mst_es_cl}_m2_{mst_es_ls}_{datastamp}.csv")
+    write_csv(dset_multistate, here("tables", filename))
+  }
+  # prosp_sens_es <- sapply(test_time, function(t) {
+  #   sim_stage_prosp_sens(test_time = t, 
+  #                        dset = dset_multistate,
+  #                        include_es_ls = FALSE)})
+  prosp_sens_es_ls <- sapply(test_time, function(t) {
+    sim_stage_prosp_sens(test_time = t, 
+                         dset = dset_multistate,
+                         include_es_ls = TRUE)})
+  dset <- data.frame(time = test_time,
+                     # prosp_sens_es,
+                     sensitivity = prosp_sens_es_ls[1,],
+                     fraction = prosp_sens_es_ls[2,])
+  
+  return(dset)
+}
+
+plot_sens <- function(dset, ext = "png", saveit){
+  gg <- dset %>%
+    filter(mst_es_cl %in% c(2, 6, 10) & mst_es_ls %in% c(2, 6, 10)) %>%
+    ggplot(aes(x = time, y = sensitivity, color = factor(mst_es_cl))) +
+    geom_point(aes(size = fraction), alpha = 0.5) +
+    geom_line() +
+    facet_grid(.~mst_es_ls, 
+               labeller = labeller(mst_es_ls = label_both)) +
+    ylim(0, 0.8) +
+    scale_x_continuous(breaks = unique(dset$time)) +
+    xlab("Time since study began") +
+    ylab("Sensitivity in early stage") +
+    scale_color_discrete(name = "MST from early stage to clinical") +
+    scale_size_continuous(name = "Fraction of early stage to clinical") +
+    theme(legend.position = "bottom",
+          legend.box = "vertical")
+  print(gg)
+  
+  if(saveit){
+    filename <- str_glue("fig_multistate_{datastamp}.{ext}")
+    ggsave(plot = print(gg), here('figure', filename), width = 8, height = 4)
+  }
+}
+
+control <- function(N = 10000,
+                    test_time = 1:10,
+                    pre_onset_rate = 0.1,
+                    mst_es_cl = seq(2, 10, 2),
+                    mst_es_ls = seq(2, 10, 2),
+                    mst_ls_cl = 2,
+                    saveit){
+  set.seed(123)
+  cset <- expand_grid(mst_es_cl, mst_es_ls)
+  cset$id <- 1:nrow(cset)
+  no_cores <- detectCores()# - 2  # leaving one core free
+  registerDoParallel(cores=no_cores)
+  dset_all <- 
+    foreach(i = cset$id, .combine = "rbind") %dopar% {
+    dset <- sim_sens(N = N,
+             test_time = test_time,
+             pre_onset_rate = pre_onset_rate,
+             mst_es_cl = cset$mst_es_cl[i],
+             mst_es_ls = cset$mst_es_ls[i],
+             mst_ls_cl = mst_ls_cl)
+    dset <- data.frame(id = i, dset)
+    }
+  # dset_all <- dset_all %>% right_join(cset)
+  # # write_csv(dset_all, here("tables", "tbl_all.csv"))
+  dset_all <- read_csv(here("tables", "tbl_all.csv"))
+  plot_sens(dset = dset_all, saveit = saveit)
+  
+  # filename <- str_glue("tbl_m1_6_m2_4_test_5_{datastamp}.csv")
+  # dset <- read_csv(here("tables", filename))
+  # dset %>% group_by(es_cl) %>% summarise(mean(sensitivity))
+}
+control(saveit = TRUE)
 
 
 
