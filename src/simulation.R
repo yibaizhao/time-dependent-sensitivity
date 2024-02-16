@@ -300,6 +300,7 @@ plot_test_sensitivity_stage_experiment <- function(mst=c(etoc=6, etol=4),
                                discrete=TRUE,
                                begin=0.65,
                                end=0.25)
+  gg <- gg+guides(col=guide_legend(override.aes=list(linewidth=1, alpha=1)))
   print(gg)
   if(saveit){
     filename <- str_glue('prospective_sensitivity_experiment_{datestamp}.{ext}')
