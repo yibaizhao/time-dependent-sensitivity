@@ -10,8 +10,11 @@ library(tidyverse)
 library(here)
 library(readr)
 library(ggplot2)
+library(scales)
 
-datastamp <- '02-13-2024'
+# datastamp <- '2024-02-13'
+# datastamp <- '2024-02-15'
+datastamp <- '2024-02-20'
 
 ########################################################################################
 sim.ctmc<-function(start.state,rate.matrix, end.time,start.time=0,absorbing.state=0){
@@ -60,144 +63,6 @@ sim.ctmc<-function(start.state,rate.matrix, end.time,start.time=0,absorbing.stat
   return(return.list)
 }
 
-discrete.ctmc<-function(ctmc.times,ctmc.states,obs.times){
-  ###################################################################################################
-  #Author: 
-  # This function gets the state of a CTMC at different discrete observation times
-  #INPUTS: ctmc.times=the transition times for the CTMC
-  #        ctmc.states=the states at each of the transition times
-  #        obs.times = the discrete observation times
-  #
-  #OUTPUTS: a dataframe with two columns: obs.times= observation times, states=value of state at obs.times
-  #WARNING: if the observation times are outside of max and min transition time, then
-  #         the state is assumed to be unchanged from the closest recorded transition time
-  #################################################################################################
-  out<- data.frame(approx(x=ctmc.times,y=ctmc.states,xout=obs.times,rule=2,f=0,method="constant"))
-  colnames(out)<-c("obs.times","states")
-  return(out)
-}
-
-get.observed.datapoint<-function(underlying.state,emission.matrix){
-  ###################################################################################################
-  #Author: 
-  # This function gets an observed data point in a HMM based on an underlying state an emission matrix
-  #INPUTS: underlying.state = unobserved underlying state in HMM,
-  #        emmision.matrix=a matrix with the emission probablities.
-  #        the ith row corresponds to the hidden value X(t)=i, and the kth column to O(t)=k|X(t)=i
-  #        thus the rows sum to 1, and k columns correspond to the k possible observed states
-  #OUTPUTS: the observed data point
-  #################################################################################################
-  states<-seq(1:dim(emission.matrix)[2])
-  probs<-emission.matrix[underlying.state,]
-  # browser()
-  sample(x=states,size=1,prob=probs)
-}
-
-
-observed.data.hmm<-function(obs.times,underlying.states,emission.matrix){
-  ###################################################################################################
-  #Author JL
-  # This function the observed states in an HMM for multiple observation times
-  # INPUTS: obs.times=a vector of observatio11n times; underlying states=corresponding underlying states
-  #         emission.matrix=emission matrix for observed data
-  #These functins get the observed data point based on an underlying state and a emission matrix
-  #
-  #
-  #################################################################################################
-  obs.data<-sapply(underlying.states,FUN="get.observed.datapoint",emission.matrix)
-  # browser()
-  out<-data.frame(obs.times, obs.data)
-  colnames(out)<-c("obs.times","obs.data")
-  return(out)
-}
-
-
-get.dx=function(rate.matrix,
-                start.dist,
-                screen.times,
-                post.screen.lookout,
-                clinical.cancer.state,
-                pre.clinical.cancer.state,
-                multiple.tests=TRUE){
-  ###################################################################################################
-  #Author YZ&JL
-  # This function ascertains whether a person is screen or interval detected during a series of screens
-  # INPUTS: rate.matrix=transition matrix of cancer model
-  #         start.dist=starting probability distribution for cancer model
-  #         sensitivity of the test for detecting pre-clinical cancer
-  #         screen.times=times of screening
-  #         post.screen.lookout = duration of time to look out for interval cancer after last screen
-  #         clinical.cancer.state= state corresponding to clinical cancer
-  #         pre.clinical.cancer.state=state corresponding to pre-clinical cancer
-  # OUTPUTS: result=1 if no cancer discovered, 2 if screen detected, 3=interval detected
-  #
-  #################################################################################################
-  #  browser()
-  nstates=dim(rate.matrix)[1]
-  thetimes=c(screen.times,max(screen.times)+post.screen.lookout)
-  
-  # generate true natural history
-  the.start.state=sample(1:nstates,size=1,prob=start.dist)
-  outctmc=sim.ctmc(start.state=the.start.state,rate.matrix=rate.matrix, 
-                   end.time=1000,start.time=0,absorbing.state=clinical.cancer.state)
-  sojourn_time <- outctmc$times[clinical.cancer.state]-outctmc$times[pre.clinical.cancer.state]
-  
-  # generate the true state at observe time
-  discreteout=discrete.ctmc(ctmc.times = outctmc$times,ctmc.states=outctmc$states,obs.times=thetimes)
-  
-  # generate observed state at observe time
-  # get the total number of cores
-  numOfCores <- detectCores() #- 2
-  # register all the cores
-  registerDoParallel(numOfCores) 
-  obsout <- foreach(t=discreteout$obs.times, .combine=rbind) %dopar%  {
-    t.state=discreteout$states[discreteout$obs.times==t]
-    sensitivity <- test_sensitivity(sojourn_time=sojourn_time,
-                                    onset_sensitivity=0.2,
-                                    clinical_sensitivity=0.8,
-                                    is_indolent=FALSE,
-                                    time=t-outctmc$times[pre.clinical.cancer.state], # test time-preclinical onset time
-                                    method='linear')$sensitivity
-    # print(paste("t=", t, ", state=", t.state, ", sens=", sensitivity))
-    emission.mat=diag(x=1,nrow=nstates,ncol=nstates)
-    emission.mat[pre.clinical.cancer.state,pre.clinical.cancer.state]=sensitivity
-    emission.mat[pre.clinical.cancer.state,1]=1-sensitivity
-    dset_obs <- observed.data.hmm(obs.times=t,underlying.states=t.state,emission.matrix = emission.mat)
-    dset_obs$true.sens <- ifelse(sensitivity==0, NA, sensitivity)
-    dset_obs
-  }
-  obsout$state <- discreteout$states
-  
-  # obtain 1=no cancer detected, 2=screen, 3=interval
-  obsout$result <- NA
-  for(t in screen.times){
-    t_post <- t+post.screen.lookout
-    obsout_t <- obsout %>% filter(obs.times %in% c(t, t_post))
-    ## state 1 otherwise
-    result=1
-    ## state 3: if test time is negative, post screen time is state 3; OR test time already state 3
-    result[(obsout_t$obs.data[1]==1 & obsout_t$obs.data[2]==clinical.cancer.state) | obsout_t$obs.data[1]==clinical.cancer.state]=3
-    ## state 2: if none of above and test time is state 2
-    result[obsout_t$obs.data[1]==pre.clinical.cancer.state]=2
-    obsout$result[obsout$obs.times==t] <- result
-  }
-  if(multiple.tests){
-    # censored once screen detected or interval cancer
-    ## find time first detected or diagnosed
-    stop_time <- obsout$obs.times[min(which(obsout$result %in% c(pre.clinical.cancer.state, clinical.cancer.state)))]
-    obsout$result[obsout$obs.times>stop_time] <- NA
-    obsout$true.sens[obsout$obs.times>stop_time] <- NA
-  }else{
-    # censored once clinical onset
-    ## find time first clinical onset
-    stop_time <- obsout$obs.times[min(which(obsout$state == clinical.cancer.state))]
-    obsout$result[obsout$obs.times>=stop_time] <- NA
-    obsout$true.sens[obsout$obs.times>=stop_time] <- NA
-  }
-  
-  return(obsout %>% filter(obs.times %in% screen.times))
-}
-
 # function of true sensitivity at time t
 h <- function(t,
               sojourn_time,
@@ -215,7 +80,8 @@ h <- function(t,
 
 sim_stage_prosp_sens <- function(test_time, 
                                  dset,
-                                 include_es_ls = FALSE){
+                                 include_es = TRUE,
+                                 include_ls = TRUE){
   # find state at test time
   dset <- dset %>%
     filter(times < test_time) %>% # Keep rows where value is less than t
@@ -246,11 +112,18 @@ sim_stage_prosp_sens <- function(test_time,
   dset <- dset %>% mutate(frac_es_cl = mean(es_cl))
   # filename <- str_glue("tbl_m1_{mst_es_cl}_m2_{mst_es_ls}_test_{test_time}_{datastamp}.csv")
   # write_csv(dset, here("tables", filename))
-  dset <- read_csv(here("tables", filename))
+  # dset <- read_csv(here("tables", filename))
   
-  if(!include_es_ls){
-    dset <- dset %>% filter(es_cl)
+  
+  if(include_es & !include_ls){
+    # include early stage only
+    dset <- dset %>% filter(es_cl&include_es)
   }
+  if(include_ls & !include_es){
+    # include late stage only
+    dset <- dset %>% filter(!es_cl&include_ls)
+  }
+  
   return(c(sensitivity = mean(dset$sensitivity),
               fraction = unique(dset$frac_es_cl)))
 }
@@ -261,7 +134,7 @@ sim_sens <- function(N,
                      mst_es_cl,
                      mst_es_ls,
                      mst_ls_cl,
-                     saveit = TRUE){
+                     saveit = FALSE){
   rate.matrix = matrix(c(-pre_onset_rate, pre_onset_rate, 0, 0, 
                          0, -(1/mst_es_cl + 1/mst_es_ls), 1/mst_es_ls, 1/mst_es_cl,
                          0, 0, -1/mst_ls_cl, 1/mst_ls_cl,
@@ -309,16 +182,25 @@ sim_sens <- function(N,
     filename <- str_glue("tbl_m1_{mst_es_cl}_m2_{mst_es_ls}_{datastamp}.csv")
     write_csv(dset_multistate, here("tables", filename))
   }
-  # prosp_sens_es <- sapply(test_time, function(t) {
-  #   sim_stage_prosp_sens(test_time = t, 
-  #                        dset = dset_multistate,
-  #                        include_es_ls = FALSE)})
+  prosp_sens_es <- sapply(test_time, function(t) {
+    sim_stage_prosp_sens(test_time = t,
+                         dset = dset_multistate,
+                         include_es = TRUE, 
+                         include_ls = FALSE)})
+  prosp_sens_ls <- sapply(test_time, function(t) {
+    sim_stage_prosp_sens(test_time = t,
+                         dset = dset_multistate,
+                         include_es = FALSE, 
+                         include_ls = TRUE)})
   prosp_sens_es_ls <- sapply(test_time, function(t) {
     sim_stage_prosp_sens(test_time = t, 
                          dset = dset_multistate,
-                         include_es_ls = TRUE)})
+                         include_es = TRUE,
+                         include_ls = TRUE)})
+  
   dset <- data.frame(time = test_time,
-                     # prosp_sens_es,
+                     sensitivity_es = prosp_sens_es[1,],
+                     sensitivity_ls = prosp_sens_ls[1,],
                      sensitivity = prosp_sens_es_ls[1,],
                      fraction = prosp_sens_es_ls[2,])
   
@@ -326,31 +208,88 @@ sim_sens <- function(N,
 }
 
 plot_sens <- function(dset, ext = "png", saveit){
-  gg <- dset %>%
-    filter(mst_es_cl %in% c(2, 6, 10) & mst_es_ls %in% c(2, 6, 10)) %>%
-    ggplot(aes(x = time, y = sensitivity, color = factor(mst_es_cl))) +
-    geom_point(aes(size = fraction), alpha = 0.5) +
+  # prepare dset for plot
+  pset <- dset %>% filter(mst_es_cl %in% c(2, 6, 10) & mst_es_ls %in% c(2, 6, 10)) 
+  pset <- pset %>% mutate(time = time+40)
+  # pset <- pset %>% filter(time %in% seq(0, 10, 2)) 
+  # categorize fraction
+  pset <- pset %>% mutate(frac_gp = case_when(fraction <= 0.2 ~ "Fraction of early stage to clinical onset: <=20%",
+                                              fraction > 0.8 ~ "Fraction of early stage to clinical onset: >80%",
+                                              TRUE ~ "Fraction of early stage to clinical onset: >20% and <=80%"))
+  
+  theme_set(theme_classic())
+  theme_update(axis.ticks.length=unit(0.2, 'cm'))
+  
+  # gg <- pset %>%
+  #   ggplot(aes(x = time, y = sensitivity, color = factor(mst_es_cl), linetype = factor(mst_es_ls))) +
+  #   geom_line(size = 1) +
+  #   facet_grid(.~frac_gp) +
+  #   scale_x_continuous(breaks = unique(pset$time)) +
+  #   xlab("Age at screen test") +
+  #   ylab("Sensitivity in early stage") +
+  #   scale_color_discrete(name = "MST from early stage to clinical") +
+  #   scale_linetype_manual(values = c("2" = "dotted", "6" = "dashed", "10" = "solid")) +
+  #   scale_linetype_discrete(name = "MST from early stage to late stage") +
+  #   theme(legend.position = "bottom",
+  #         legend.box = "vertical") +
+  #   scale_y_continuous(limits=c(0, 0.8),
+  #                      breaks=seq(0, 1, by=0.2),
+  #                      labels=label_percent(accuracy=1),
+  #                      expand=c(0, 0))
+  # print(gg)
+  
+  pset2 <- pset %>% filter(time == 55)
+  # write_csv(pset2, here("tables", "tbl_test_55.csv"))
+  gg2 <- pset2 %>%
+    ggplot(aes(x = mst_es_cl, y = sensitivity, color = factor(mst_es_ls))) +
+    geom_point(aes(size = fraction), alpha = 0.8) +
     geom_line() +
-    facet_grid(.~mst_es_ls, 
-               labeller = labeller(mst_es_ls = label_both)) +
-    ylim(0, 0.8) +
-    scale_x_continuous(breaks = unique(dset$time)) +
-    xlab("Time since study began") +
+    # scale_x_continuous(breaks = unique(pset$time)) +
+    xlab("MST from early stage to clinical") +
     ylab("Sensitivity in early stage") +
-    scale_color_discrete(name = "MST from early stage to clinical") +
+    scale_color_discrete(name = "MST from early stage to late stage") +
     scale_size_continuous(name = "Fraction of early stage to clinical") +
+    ggtitle("Test at 55-year-old") +
     theme(legend.position = "bottom",
-          legend.box = "vertical")
-  print(gg)
+          legend.box = "vertical") +
+    scale_y_continuous(limits=c(0, 0.8),
+                       breaks=seq(0, 1, by=0.2),
+                       labels=label_percent(accuracy=1),
+                       expand=c(0, 0))
+  print(gg2)
+  
+  gg3 <- pset2 %>%
+    ggplot(aes(x = mst_es_cl, y = sensitivity, color = factor(mst_es_ls))) +
+    geom_ribbon(aes(ymin = sensitivity_es, ymax = sensitivity_ls, fill = factor(mst_es_ls)), alpha = 0.3, show.legend = FALSE) +
+    geom_point(aes(size = fraction), alpha = 0.8) +
+    geom_line() +
+    # scale_x_continuous(breaks = unique(pset$time)) +
+    xlab("MST from early stage to clinical") +
+    ylab("Sensitivity in early stage") +
+    scale_color_discrete(name = "MST from early stage to late stage") +
+    scale_size_continuous(name = "Fraction of early stage to clinical") +
+    ggtitle("Test at 55-year-old") +
+    theme(legend.position = "bottom",
+          legend.box = "vertical") +
+    scale_y_continuous(limits=c(0, 0.8),
+                       breaks=seq(0, 1, by=0.2),
+                       labels=label_percent(accuracy=1),
+                       expand=c(0, 0))
+  print(gg3)
+  
   
   if(saveit){
-    filename <- str_glue("fig_multistate_{datastamp}.{ext}")
-    ggsave(plot = print(gg), here('figure', filename), width = 8, height = 4)
+    # filename1 <- str_glue("fig_multistate_V1_{datastamp}.{ext}")
+    # ggsave(plot = print(gg), here('figure', filename1), width = 8, height = 4)
+    filename2 <- str_glue("fig_multistate_{datastamp}.{ext}")
+    ggsave(plot = print(gg2), here('figure', filename2), width = 6, height = 6)
+    filename3 <- str_glue("fig_multistate_boundary_{datastamp}.{ext}")
+    ggsave(plot = print(gg3), here('figure', filename3), width = 6, height = 6)
   }
 }
 
 control <- function(N = 10000,
-                    test_time = 1:10,
+                    test_time = 10:20,
                     pre_onset_rate = 0.1,
                     mst_es_cl = seq(2, 10, 2),
                     mst_es_ls = seq(2, 10, 2),
@@ -371,9 +310,9 @@ control <- function(N = 10000,
              mst_ls_cl = mst_ls_cl)
     dset <- data.frame(id = i, dset)
     }
-  # dset_all <- dset_all %>% right_join(cset)
-  # # write_csv(dset_all, here("tables", "tbl_all.csv"))
-  dset_all <- read_csv(here("tables", "tbl_all.csv"))
+  dset_all <- dset_all %>% right_join(cset)
+  write_csv(dset_all, here("tables", "tbl_all.csv"))
+  # dset_all <- read_csv(here("tables", "tbl_all_2024-02-22.csv"))
   plot_sens(dset = dset_all, saveit = saveit)
   
   # filename <- str_glue("tbl_m1_6_m2_4_test_5_{datastamp}.csv")
