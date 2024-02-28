@@ -318,25 +318,24 @@ plot_test_sensitivity_age_stage_experiment <- function(mst=c(etoc=6, etol=4),
                                                        test_age=55,
                                                        age=40,
                                                        mht=10,
-                                                       size=200,
+                                                       size=400,
                                                        ext='png',
                                                        saveit=FALSE){
-  eset <- tibble(id=seq(size),
+  dset <- tibble(id=seq(size),
                  onset_age=age+rexp(size, rate=1/mht),
-                 sojourn_time=rexp(size, rate=1/mst['etoc']),
-                 clinical_age=onset_age+sojourn_time)
-  eset <- eset %>% mutate(clinical_stage='early',
-                          sensitivity=map(sojourn_time,
+                 clinical_stage=rep(c('early', 'late'), each=size/2))
+  eset <- dset %>% filter(clinical_stage == 'early')
+  eset <- eset %>% mutate(sojourn_time=rexp(length(id), rate=1/mst['etoc']),
+                          clinical_age=onset_age+sojourn_time)
+  eset <- eset %>% mutate(sensitivity=map(sojourn_time,
                                           test_sensitivity,
                                           onset_sensitivity,
                                           clinical_sensitivity['early']))
   eset <- eset %>% unnest(sensitivity)
-  lset <- tibble(id=seq(size),
-                 onset_age=age+rexp(size, rate=1/mht),
-                 sojourn_time=rexp(size, rate=1/mst['etol']),
-                 clinical_age=onset_age+sojourn_time)
-  lset <- lset %>% mutate(clinical_stage='late',
-                          sensitivity=map(sojourn_time,
+  lset <- dset %>% filter(clinical_stage == 'late')
+  lset <- lset %>% mutate(sojourn_time=rexp(length(id), rate=1/mst['etol']),
+                          clinical_age=onset_age+sojourn_time)
+  lset <- lset %>% mutate(sensitivity=map(sojourn_time,
                                           test_sensitivity,
                                           onset_sensitivity,
                                           clinical_sensitivity['late']))
@@ -345,7 +344,10 @@ plot_test_sensitivity_age_stage_experiment <- function(mst=c(etoc=6, etol=4),
   sset <- sset %>% mutate(age=onset_age+time)
   sset <- sset %>% group_by(id)
   sset <- sset %>% mutate(detected=onset_age <= test_age & test_age < clinical_age)
-  sset %>% with(table(detected))
+  xset <- sset %>% filter(detected)
+  xset <- xset %>% filter(age == age[which.min(abs(age-test_age))])
+  xset <- xset %>% ungroup()
+  cat('Empirical sensitivity:', xset %>% with(mean(sensitivity, na.rm=TRUE)), '\n')
   theme_set(theme_classic())
   theme_update(axis.ticks.length=unit(0.2, 'cm'),
                legend.position='bottom')
