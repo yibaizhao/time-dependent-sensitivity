@@ -61,7 +61,8 @@ library(rlang)
 # datestamp <- '2023-10-06'
 # datestamp <- '2023-10-17'
 # datestamp <- '2024-02-14'
-datestamp <- '2024-02-15'
+#datestamp <- '2024-02-15'
+datestamp <- '2024-02-28'
 
 set.seed(1234)
 
@@ -308,6 +309,93 @@ plot_test_sensitivity_stage_experiment <- function(mst=c(etoc=6, etol=4),
            plot=gg,
            height=6,
            width=6)
+  }
+}
+
+plot_test_sensitivity_age_stage_experiment <- function(mst=c(etoc=6, etol=4),
+                                                       onset_sensitivity=0,
+                                                       clinical_sensitivity=c(early=0.4, late=0.8),
+                                                       test_age=55,
+                                                       age=40,
+                                                       mht=10,
+                                                       size=200,
+                                                       ext='png',
+                                                       saveit=FALSE){
+  eset <- tibble(id=seq(size),
+                 onset_age=age+rexp(size, rate=1/mht),
+                 sojourn_time=rexp(size, rate=1/mst['etoc']),
+                 clinical_age=onset_age+sojourn_time)
+  eset <- eset %>% mutate(clinical_stage='early',
+                          sensitivity=map(sojourn_time,
+                                          test_sensitivity,
+                                          onset_sensitivity,
+                                          clinical_sensitivity['early']))
+  eset <- eset %>% unnest(sensitivity)
+  lset <- tibble(id=seq(size),
+                 onset_age=age+rexp(size, rate=1/mht),
+                 sojourn_time=rexp(size, rate=1/mst['etol']),
+                 clinical_age=onset_age+sojourn_time)
+  lset <- lset %>% mutate(clinical_stage='late',
+                          sensitivity=map(sojourn_time,
+                                          test_sensitivity,
+                                          onset_sensitivity,
+                                          clinical_sensitivity['late']))
+  lset <- lset %>% unnest(sensitivity)
+  sset <- bind_rows(eset, lset)
+  sset <- sset %>% mutate(age=onset_age+time)
+  sset <- sset %>% group_by(id)
+  sset <- sset %>% mutate(detected=onset_age <= test_age & test_age < clinical_age)
+  sset %>% with(table(detected))
+  theme_set(theme_classic())
+  theme_update(axis.ticks.length=unit(0.2, 'cm'),
+               legend.position='bottom')
+  gg <- ggplot(sset)
+  gg <- gg+geom_hline(yintercept=clinical_sensitivity, linetype='dashed')
+  gg <- gg+geom_line(aes(x=age,
+                         y=sensitivity,
+                         group=interaction(id, clinical_stage),
+                         color=clinical_stage,
+                         alpha=detected),
+                     linewidth=0.35,
+                     show.legend=c(color=TRUE, alpha=FALSE))
+  gg <- gg+annotate('text',
+                    x=60,
+                    y=0.95,
+                    vjust=0.5,
+                    hjust=0,
+                    label=str_glue('MST from early stage to clinical diagnosis: {mst["etoc"]} years'))
+  gg <- gg+annotate('text',
+                    x=60,
+                    y=0.85,
+                    vjust=0.5,
+                    hjust=0,
+                    label=str_glue('MST from early stage to late stage: {mst["etol"]} years'))
+  gg <- gg+geom_vline(xintercept=test_age,
+                      size=1.25,
+                      color='orange',
+                      alpha=0.75)
+  gg <- gg+scale_x_continuous(name='Age (years)',
+                              limits=c(40, 100),
+                              breaks=seq(40, 100, by=5),
+                              expand=c(0, 0))
+  gg <- gg+scale_y_continuous(name='Sensitivity',
+                              limits=c(0, 1),
+                              breaks=seq(0, 1, by=0.1),
+                              labels=label_percent(accuracy=1),
+                              expand=c(0, 0))
+  gg <- gg+scale_color_viridis(name='Stage at clinical diagnosis',
+                               discrete=TRUE,
+                               begin=0.65,
+                               end=0.25)
+  gg <- gg+scale_alpha_manual(values=c('TRUE'=1, 'FALSE'=0.2))
+  gg <- gg+guides(col=guide_legend(override.aes=list(linewidth=1, alpha=1)))
+  print(gg)
+  if(saveit){
+    filename <- str_glue('prospective_sensitivity_age_stage_{mst["etol"]}_{datestamp}.{ext}')
+    ggsave(here('plot', filename),
+           plot=gg,
+           height=5,
+           width=8)
   }
 }
 
@@ -1005,11 +1093,27 @@ control <- function(N=10000,
   #                            saveit=saveit)
 
   # visualize how test sensitivity depends on clinical stage
-  plot_test_sensitivity_stage_experiment(mst=c(etoc=6, etol=4),
-                                         onset_sensitivity=0,
-                                         clinical_sensitivity=c(early=0.3, late=0.8),
-                                         ext=ext,
-                                         saveit=saveit)
+  #plot_test_sensitivity_stage_experiment(mst=c(etoc=6, etol=4),
+  #                                       onset_sensitivity=0,
+  #                                       clinical_sensitivity=c(early=0.3, late=0.8),
+  #                                       ext=ext,
+  #                                       saveit=saveit)
+
+  # visualize how test sensitivity depends on age and clinical stage
+  plot_test_sensitivity_age_stage_experiment(mst=c(etoc=6, etol=2),
+                                             onset_sensitivity=0,
+                                             clinical_sensitivity=c(early=0.3, late=0.8),
+                                             age=40,
+                                             mht=10,
+                                             ext=ext,
+                                             saveit=saveit)
+  plot_test_sensitivity_age_stage_experiment(mst=c(etoc=6, etol=10),
+                                             onset_sensitivity=0,
+                                             clinical_sensitivity=c(early=0.3, late=0.8),
+                                             age=40,
+                                             mht=10,
+                                             ext=ext,
+                                             saveit=saveit)
   stop()
 
   # simulate natural histories
