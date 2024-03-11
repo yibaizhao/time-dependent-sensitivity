@@ -30,6 +30,7 @@ library(doParallel)
 library(tidyr)
 library(viridis)
 library(rlang)
+library(ggpubr)
 
 # datestamp <- '2022-12-12'
 # datestamp <- '2023-01-26'
@@ -62,7 +63,8 @@ library(rlang)
 # datestamp <- '2023-10-17'
 # datestamp <- '2024-02-14'
 #datestamp <- '2024-02-15'
-datestamp <- '2024-02-28'
+#datestamp <- '2024-02-28'
+datestamp <- '2024-03-11'
 
 set.seed(1234)
 
@@ -312,24 +314,24 @@ plot_test_sensitivity_stage_experiment <- function(mst=c(etoc=6, etol=4),
   }
 }
 
-plot_test_sensitivity_age_stage_experiment <- function(mst=c(etoc=6, etol=4),
+plot_test_sensitivity_age_stage_experiment <- function(dset,
                                                        onset_sensitivity=0,
-                                                       clinical_sensitivity=c(early=0.4, late=0.8),
-                                                       prob_early=0.5,
+                                                       clinical_sensitivity=c(early=0.3, late=0.8),
                                                        test_age=55,
                                                        age=40,
                                                        mht=10,
                                                        size=400,
                                                        ext='png',
                                                        saveit=FALSE){
+  svec <- unlist(dset)
   dset <- tibble(id=seq(size),
                  onset_age=age+rexp(size, rate=1/mht),
-                 clinical_stage=rbinom(n=size, size=1, prob=prob_early))
+                 clinical_stage=rbinom(n=size, size=1, prob=svec['prob_early']))
   dset <- dset %>% mutate(clinical_stage=factor(clinical_stage,
                                                 levels=c(1, 0),
                                                 labels=c('early', 'late')))
   eset <- dset %>% filter(clinical_stage == 'early')
-  eset <- eset %>% mutate(sojourn_time=rexp(length(id), rate=1/mst['etoc']),
+  eset <- eset %>% mutate(sojourn_time=rexp(length(id), rate=1/svec['etoc']),
                           clinical_age=onset_age+sojourn_time)
   eset <- eset %>% mutate(sensitivity=map(sojourn_time,
                                           test_sensitivity,
@@ -337,7 +339,7 @@ plot_test_sensitivity_age_stage_experiment <- function(mst=c(etoc=6, etol=4),
                                           clinical_sensitivity['early']))
   eset <- eset %>% unnest(sensitivity)
   lset <- dset %>% filter(clinical_stage == 'late')
-  lset <- lset %>% mutate(sojourn_time=rexp(length(id), rate=1/mst['etol']),
+  lset <- lset %>% mutate(sojourn_time=rexp(length(id), rate=1/svec['etol']),
                           clinical_age=onset_age+sojourn_time)
   lset <- lset %>% mutate(sensitivity=map(sojourn_time,
                                           test_sensitivity,
@@ -369,13 +371,15 @@ plot_test_sensitivity_age_stage_experiment <- function(mst=c(etoc=6, etol=4),
                     y=0.95,
                     vjust=0.5,
                     hjust=0,
-                    label=str_glue('MST from early stage to clinical diagnosis: {mst["etoc"]} years'))
+                    label=str_glue('MST from early stage to clinical diagnosis: {svec["etoc"]} years'),
+                    color='#2FB47CFF')
   gg <- gg+annotate('text',
                     x=60,
                     y=0.85,
                     vjust=0.5,
                     hjust=0,
-                    label=str_glue('MST from early stage to late stage: {mst["etol"]} years'))
+                    label=str_glue('MST from early stage to late stage: {svec["etol"]} years'),
+                    color='#3B528BFF')
   gg <- gg+geom_vline(xintercept=test_age,
                       size=1.25,
                       color='orange',
@@ -389,7 +393,7 @@ plot_test_sensitivity_age_stage_experiment <- function(mst=c(etoc=6, etol=4),
                               breaks=seq(0, 1, by=0.1),
                               labels=label_percent(accuracy=1),
                               expand=c(0, 0))
-  gg <- gg+scale_color_viridis(name='Stage at clinical diagnosis',
+  gg <- gg+scale_color_viridis(name='Clinical stage',
                                discrete=TRUE,
                                begin=0.65,
                                end=0.25)
@@ -397,12 +401,13 @@ plot_test_sensitivity_age_stage_experiment <- function(mst=c(etoc=6, etol=4),
   gg <- gg+guides(col=guide_legend(override.aes=list(linewidth=1, alpha=1)))
   print(gg)
   if(saveit){
-    filename <- str_glue('prospective_sensitivity_age_stage_{mst["etol"]}_{datestamp}.{ext}')
+    filename <- str_glue('prospective_sensitivity_age_stage_{svec["etol"]}_{datestamp}.{ext}')
     ggsave(here('plot', filename),
            plot=gg,
            height=5,
            width=8)
   }
+  return(gg)
 }
 
 ##################################################
@@ -1106,23 +1111,27 @@ control <- function(N=10000,
   #                                       saveit=saveit)
 
   # visualize how test sensitivity depends on age and clinical stage
-  plot_test_sensitivity_age_stage_experiment(mst=c(etoc=6, etol=2),
-                                             onset_sensitivity=0,
-                                             clinical_sensitivity=c(early=0.3, late=0.8),
-                                             prob_early=0.28,
-                                             age=40,
-                                             mht=10,
-                                             ext=ext,
-                                             saveit=saveit)
-  plot_test_sensitivity_age_stage_experiment(mst=c(etoc=6, etol=10),
-                                             onset_sensitivity=0,
-                                             clinical_sensitivity=c(early=0.3, late=0.8),
-                                             prob_early=0.65,
-                                             age=40,
-                                             mht=10,
-                                             ext=ext,
-                                             saveit=saveit)
-  stop()
+  mset <- expand_grid(etoc=c(2, 10),
+                      etol=c(2, 10))
+  mset <- mset %>% mutate(prob_early=case_when(etoc == 2 & etol == 2 ~ 0.55,
+                                               etoc == 2 & etol == 10 ~ 0.84,
+                                               etoc == 10 & etol == 2 ~ 0.15,
+                                               etoc == 10 & etol == 10 ~ 0.51))
+  mset <- mset %>% by_row(..f=plot_test_sensitivity_age_stage_experiment, .to='plot')
+  mset <- mset %>% arrange(desc(etol), etoc)
+  gg <- ggarrange(plotlist=mset$plot,
+                  nrow=2,
+                  ncol=2,
+                  common.legend=TRUE,
+                  legend='bottom')
+  gg <- gg+bgcolor('white')
+  if(saveit){
+    filename <- str_glue('prospective_sensitivity_age_stage_experiments_{datestamp}.{ext}')
+    ggsave(here('plot', filename),
+           plot=gg,
+           height=8,
+           width=14)
+  }
 
   # simulate natural histories
   dset <- expand_grid(test_age, mean_sojourn_time, indolent_rate)
