@@ -31,6 +31,7 @@ library(tidyr)
 library(viridis)
 library(rlang)
 library(ggpubr)
+library(ggpmisc)
 
 # datestamp <- '2022-12-12'
 # datestamp <- '2023-01-26'
@@ -64,9 +65,10 @@ library(ggpubr)
 # datestamp <- '2024-02-14'
 #datestamp <- '2024-02-15'
 #datestamp <- '2024-02-28'
-datestamp <- '2024-03-11'
+#datestamp <- '2024-03-11'
+datestamp <- '2024-03-21'
 
-set.seed(1234)
+set.seed(12345)
 
 ##################################################
 # Prospective sensitivity evaluated at specified times
@@ -93,9 +95,9 @@ test_sensitivity <- function(sojourn_time,
       beta <- -log(onset_sensitivity/clinical_sensitivity)-alpha
       tset <- tibble(time=time, sensitivity=1/(1+exp(-(alpha+beta/sojourn_time*time))))
     }
-    tset <- tset %>%
-      mutate(sensitivity=ifelse(sensitivity<=clinical_sensitivity, sensitivity, NA),
-             sensitivity=ifelse(time<0|time>sojourn_time, NA, sensitivity))
+    #tset <- tset %>%
+    #  mutate(sensitivity=ifelse(sensitivity<=clinical_sensitivity, sensitivity, NA),
+    #         sensitivity=ifelse(time<0|time>sojourn_time, NA, sensitivity))
   }else{
     tset <- tibble(time=time, 
                    sensitivity=onset_sensitivity+(clinical_sensitivity-onset_sensitivity)*(1-exp(-1/sojourn_time*time)))
@@ -316,44 +318,53 @@ plot_test_sensitivity_stage_experiment <- function(mst=c(etoc=6, etol=4),
 
 plot_test_sensitivity_age_stage_experiment <- function(dset,
                                                        onset_sensitivity=0,
-                                                       clinical_sensitivity=c(early=0.3, late=0.8),
+                                                       clinical_sensitivity=c(Early=0.3, Late=0.8),
                                                        test_age=55,
                                                        age=40,
                                                        mht=10,
                                                        size=400,
                                                        ext='png',
                                                        saveit=FALSE){
-  svec <- unlist(dset)
-  dset <- tibble(id=seq(size),
+  oset <- tibble(id=seq(size),
                  onset_age=age+rexp(size, rate=1/mht),
-                 clinical_stage=rbinom(n=size, size=1, prob=svec['prob_early']))
-  dset <- dset %>% mutate(clinical_stage=factor(clinical_stage,
+                 clinical_stage=rbinom(n=size,
+                                       size=1,
+                                       prob=with(dset, Proportion[Stage == 'Early'])))
+  oset <- oset %>% mutate(clinical_stage=factor(clinical_stage,
                                                 levels=c(1, 0),
-                                                labels=c('early', 'late')))
-  eset <- dset %>% filter(clinical_stage == 'early')
-  eset <- eset %>% mutate(sojourn_time=rexp(length(id), rate=1/svec['etoc']),
+                                                labels=c('Early', 'Late')))
+  eset <- oset %>% filter(clinical_stage == 'Early')
+  eset <- eset %>% mutate(sojourn_time=rexp(length(id), rate=1/with(dset, MST[Stage == 'Early'])),
                           clinical_age=onset_age+sojourn_time)
   eset <- eset %>% mutate(sensitivity=map(sojourn_time,
                                           test_sensitivity,
                                           onset_sensitivity,
-                                          clinical_sensitivity['early']))
+                                          clinical_sensitivity['Early']))
   eset <- eset %>% unnest(sensitivity)
-  lset <- dset %>% filter(clinical_stage == 'late')
-  lset <- lset %>% mutate(sojourn_time=rexp(length(id), rate=1/svec['etol']),
+  lset <- oset %>% filter(clinical_stage == 'Late')
+  lset <- lset %>% mutate(sojourn_time=rexp(length(id), rate=1/with(dset, MST[Stage == 'Late'])),
                           clinical_age=onset_age+sojourn_time)
   lset <- lset %>% mutate(sensitivity=map(sojourn_time,
                                           test_sensitivity,
                                           onset_sensitivity,
-                                          clinical_sensitivity['late']))
+                                          clinical_sensitivity['Late']))
   lset <- lset %>% unnest(sensitivity)
   sset <- bind_rows(eset, lset)
   sset <- sset %>% mutate(age=onset_age+time)
   sset <- sset %>% group_by(id)
   sset <- sset %>% mutate(detected=onset_age <= test_age & test_age < clinical_age)
+  # calculate empirical sensitivity within stage
   xset <- sset %>% filter(detected)
   xset <- xset %>% filter(age == age[which.min(abs(age-test_age))])
   xset <- xset %>% ungroup()
-  cat('Empirical sensitivity:', xset %>% with(mean(sensitivity, na.rm=TRUE)), '\n')
+  xset <- xset %>% group_by(Stage=clinical_stage)
+  xset <- xset %>% summarize(Sensitivity=mean(sensitivity))
+  tset <- full_join(dset, xset, by='Stage')
+  tset <- tset %>% mutate(Proportion=sprintf('%4.2f', Proportion),
+                          Sensitivity=sprintf('%4.2f', Sensitivity))
+  gt_theme <- gridExtra::ttheme_minimal()
+  cols <- c('#2FB47CFF', '#3B528BFF')
+  gt_theme$core$fg_params$col <- cols
   theme_set(theme_classic())
   theme_update(axis.ticks.length=unit(0.2, 'cm'),
                legend.position='bottom')
@@ -366,24 +377,17 @@ plot_test_sensitivity_age_stage_experiment <- function(dset,
                          alpha=detected),
                      linewidth=0.35,
                      show.legend=c(color=TRUE, alpha=FALSE))
-  gg <- gg+annotate('text',
-                    x=60,
-                    y=0.95,
-                    vjust=0.5,
-                    hjust=0,
-                    label=str_glue('MST from early stage to clinical diagnosis: {svec["etoc"]} years'),
-                    color='#2FB47CFF')
-  gg <- gg+annotate('text',
-                    x=60,
-                    y=0.85,
-                    vjust=0.5,
-                    hjust=0,
-                    label=str_glue('MST from early stage to late stage: {svec["etol"]} years'),
-                    color='#3B528BFF')
   gg <- gg+geom_vline(xintercept=test_age,
-                      size=1.25,
+                      linewidth=1.25,
                       color='orange',
                       alpha=0.75)
+  gg <- gg+annotate(geom='table',
+                    x=100,
+                    y=1,
+                    vjust=1,
+                    hjust=1,
+                    label=list(tset),
+                    table.theme=gt_theme)
   gg <- gg+scale_x_continuous(name='Age (years)',
                               limits=c(40, 100),
                               breaks=seq(40, 100, by=5),
@@ -1111,26 +1115,37 @@ control <- function(N=10000,
   #                                       saveit=saveit)
 
   # visualize how test sensitivity depends on age and clinical stage
-  mset <- expand_grid(etoc=c(2, 10),
-                      etol=c(2, 10))
-  mset <- mset %>% mutate(prob_early=case_when(etoc == 2 & etol == 2 ~ 0.55,
-                                               etoc == 2 & etol == 10 ~ 0.84,
-                                               etoc == 10 & etol == 2 ~ 0.15,
-                                               etoc == 10 & etol == 10 ~ 0.51))
-  mset <- mset %>% by_row(..f=plot_test_sensitivity_age_stage_experiment, .to='plot')
-  mset <- mset %>% arrange(desc(etol), etoc)
+  mset <- expand_grid(Early=c(2, 10),
+                      Late=c(2, 10))
+  mset <- mset %>% mutate(Scenario=seq(n()))
+  mset <- mset %>% pivot_longer(cols=-Scenario,
+                                names_to='Stage',
+                                values_to='MST')
+  mset <- mset %>% mutate(Proportion=case_when(Scenario == 1 & Stage == 'Early' ~ 0.50,
+                                               Scenario == 2 & Stage == 'Early' ~ 0.83,
+                                               Scenario == 3 & Stage == 'Early' ~ 0.17,
+                                               Scenario == 4 & Stage == 'Early' ~ 0.50))
+  mset <- mset %>% group_by(Scenario)
+  mset <- mset %>% mutate(Proportion=if_else(Stage == 'Early',
+                                             Proportion,
+                                             1-sum(Proportion, na.rm=TRUE)))
+  mset <- mset %>% nest(data=-Scenario)
+  mset <- mset %>% mutate(plot=map(data, plot_test_sensitivity_age_stage_experiment))
+  mset <- mset %>% mutate(Scenario=factor(Scenario, levels=c(2, 4, 1, 3)))
+  mset <- mset %>% arrange(Scenario)
   gg <- ggarrange(plotlist=mset$plot,
                   nrow=2,
                   ncol=2,
                   common.legend=TRUE,
                   legend='bottom')
   gg <- gg+bgcolor('white')
+  print(gg)
   if(saveit){
     filename <- str_glue('prospective_sensitivity_age_stage_experiments_{datestamp}.{ext}')
     ggsave(here('plot', filename),
            plot=gg,
-           height=8,
-           width=14)
+           height=10,
+           width=12)
   }
 
   # simulate natural histories
