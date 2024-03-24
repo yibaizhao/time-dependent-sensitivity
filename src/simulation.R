@@ -66,7 +66,8 @@ library(ggpmisc)
 #datestamp <- '2024-02-15'
 #datestamp <- '2024-02-28'
 #datestamp <- '2024-03-11'
-datestamp <- '2024-03-21'
+#datestamp <- '2024-03-21'
+datestamp <- '2024-03-24'
 
 set.seed(12345)
 
@@ -81,7 +82,8 @@ test_sensitivity <- function(sojourn_time,
                              onset_sensitivity,
                              clinical_sensitivity,
                              is_indolent=FALSE,
-                             time=seq(0, sojourn_time, length=20),
+                             length=20,
+                             time=seq(0, sojourn_time, length=length),
                              method='linear'){
   # alpha=log(1/onset_sensitivity-1)
   # beta=1/sojourn_time*(log(1/clinical_sensitivity-1)-alpha)
@@ -181,6 +183,176 @@ plot_test_sensitivity <- function(sojourn_time,
            plot=gg,
            height=6,
            width=6)
+  }
+}
+
+plot_test_sensitivity_overall_example <- function(onset_sensitivity=0,
+                                                  clinical_sensitivity=0.8,
+                                                  test_age=55){
+  dset <- tibble(onset_age=49,
+                 sojourn_time=8,
+                 clinical_age=onset_age+sojourn_time)
+  dset <- dset %>% mutate(sensitivity=map(sojourn_time,
+                                          test_sensitivity,
+                                          onset_sensitivity,
+                                          clinical_sensitivity,
+                                          length=100))
+  dset <- dset %>% unnest(sensitivity)
+  dset <- dset %>% mutate(age=onset_age+time)
+  # identify prospective sensitivity
+  xset <- dset %>% filter(age == age[which.min(abs(age-test_age))])
+  theme_set(theme_classic())
+  theme_update(axis.ticks.length=unit(0.2, 'cm'),
+               plot.title=element_text(hjust=0.5),
+               legend.position='none')
+  gg <- ggplot(dset)
+  gg <- gg+labs(title='Sensitivity across clinical stages')
+  gg <- gg+geom_hline(yintercept=clinical_sensitivity,
+                      color='#25848EFF',
+                      linetype='dashed')
+  gg <- gg+annotate('text',
+                    x=100,
+                    y=clinical_sensitivity,
+                    label=sprintf('Retrospective = %2.0f%%', 100*clinical_sensitivity),
+                    color='#25848EFF',
+                    hjust=1,
+                    vjust=-0.5)
+  gg <- gg+geom_line(aes(x=age,
+                         y=sensitivity),
+                     color='#25848EFF',
+                     linewidth=0.35,
+                     show.legend=TRUE)
+  gg <- gg+geom_vline(xintercept=test_age,
+                      linewidth=1.25,
+                      color='orange',
+                      alpha=0.75)
+  gg <- gg+geom_segment(data=xset,
+                        aes(x=60,
+                            xend=age+1,
+                            y=sensitivity,
+                            yend=sensitivity),
+                        color='#25848EFF',
+                        arrow=arrow(length=unit(0.2, 'cm'), type='closed'),
+                        show.legend=FALSE)
+  gg <- gg+geom_text(data=xset,
+                     aes(x=60,
+                         y=sensitivity,
+                         label=sprintf('Prospective = %2.0f%%', 100*sensitivity)),
+                     color='#25848EFF',
+                     hjust=-0.1,
+                     show.legend=FALSE)
+  gg <- gg+scale_x_continuous(name='Age (years)',
+                              limits=c(40, 100),
+                              breaks=seq(40, 100, by=5),
+                              expand=c(0, 0))
+  gg <- gg+scale_y_continuous(name='Sensitivity',
+                              limits=c(0, 1),
+                              breaks=seq(0, 1, by=0.1),
+                              labels=label_percent(accuracy=1),
+                              expand=c(0, 0))
+  return(gg)
+}
+
+plot_test_sensitivity_stage_example <- function(onset_sensitivity=0,
+                                                clinical_sensitivity=c(Early=0.3, Late=0.8),
+                                                test_age=55){
+  eset <- tibble(onset_age=48,
+                 clinical_stage='Early',
+                 sojourn_time=10,
+                 clinical_age=onset_age+sojourn_time)
+  eset <- eset %>% mutate(sensitivity=map(sojourn_time,
+                                          test_sensitivity,
+                                          onset_sensitivity,
+                                          clinical_sensitivity['Early'],
+                                          length=100))
+  eset <- eset %>% unnest(sensitivity)
+  lset <- tibble(onset_age=52,
+                 clinical_stage='Late',
+                 sojourn_time=6,
+                 clinical_age=onset_age+sojourn_time)
+  lset <- lset %>% mutate(sensitivity=map(sojourn_time,
+                                          test_sensitivity,
+                                          onset_sensitivity,
+                                          clinical_sensitivity['Late'],
+                                          length=100))
+  lset <- lset %>% unnest(sensitivity)
+  sset <- bind_rows(eset, lset)
+  sset <- sset %>% mutate(age=onset_age+time)
+  # identify prospective sensitivity within stage
+  xset <- sset %>% group_by(clinical_stage)
+  xset <- xset %>% filter(age == age[which.min(abs(age-test_age))])
+  theme_set(theme_classic())
+  theme_update(axis.ticks.length=unit(0.2, 'cm'),
+               plot.title=element_text(hjust=0.5),
+               legend.position='none')
+  gg <- ggplot(sset)
+  gg <- gg+labs(title='Sensitivity within clinical stages')
+  gg <- gg+geom_hline(data=xset,
+                      aes(yintercept=clinical_sensitivity,
+                          color=clinical_stage),
+                      linetype='dashed')
+  gg <- gg+geom_text(data=xset,
+                     aes(x=100,
+                         y=clinical_sensitivity,
+                         color=clinical_stage,
+                         label=sprintf('Retrospective = %2.0f%%', 100*clinical_sensitivity)),
+                     hjust=1,
+                     vjust=-0.5,
+                     show.legend=FALSE)
+  gg <- gg+geom_line(aes(x=age,
+                         y=sensitivity,
+                         group=clinical_stage,
+                         color=clinical_stage),
+                     linewidth=0.35,
+                     show.legend=TRUE)
+  gg <- gg+geom_vline(xintercept=test_age,
+                      linewidth=1.25,
+                      color='orange',
+                      alpha=0.75)
+  gg <- gg+geom_segment(data=xset,
+                        aes(x=60,
+                            xend=age+1,
+                            y=sensitivity,
+                            yend=sensitivity,
+                            color=clinical_stage),
+                        arrow=arrow(length=unit(0.2, 'cm'), type='closed'),
+                        show.legend=FALSE)
+  gg <- gg+geom_text(data=xset,
+                     aes(x=60,
+                         y=sensitivity,
+                         color=clinical_stage,
+                         label=sprintf('Prospective = %2.0f%%', 100*sensitivity)),
+                     hjust=-0.1,
+                     show.legend=FALSE)
+  gg <- gg+scale_x_continuous(name='Age (years)',
+                              limits=c(40, 100),
+                              breaks=seq(40, 100, by=5),
+                              expand=c(0, 0))
+  gg <- gg+scale_y_continuous(name='Sensitivity',
+                              limits=c(0, 1),
+                              breaks=seq(0, 1, by=0.1),
+                              labels=label_percent(accuracy=1),
+                              expand=c(0, 0))
+  gg <- gg+scale_color_viridis(name='Clinical\nstage',
+                               discrete=TRUE,
+                               begin=0.65,
+                               end=0.25)
+  gg <- gg+guides(col=guide_legend(override.aes=list(linewidth=1, alpha=1)))
+  return(gg)
+}
+
+plot_test_sensitivity_examples <- function(ext='png', saveit=FALSE){
+  go <- plot_test_sensitivity_overall_example()
+  gs <- plot_test_sensitivity_stage_example()
+  gg <- ggarrange(go, gs, nrow=1)
+  gg <- gg+bgcolor('white')
+  print(gg)
+  if(saveit){
+    filename <- str_glue('prospective_sensitivity_examples_{datestamp}.{ext}')
+    ggsave(here('plot', filename),
+           plot=gg,
+           height=6,
+           width=12)
   }
 }
 
@@ -412,6 +584,41 @@ plot_test_sensitivity_age_stage_experiment <- function(dset,
            width=8)
   }
   return(gg)
+}
+
+plot_test_sensitivity_age_stage_experiment_table <- function(ext='png', saveit=FALSE){
+  mset <- expand_grid(Early=c(2, 10),
+                      Late=c(2, 10))
+  mset <- mset %>% mutate(Scenario=seq(n()))
+  mset <- mset %>% pivot_longer(cols=-Scenario,
+                                names_to='Stage',
+                                values_to='MST')
+  mset <- mset %>% mutate(Proportion=case_when(Scenario == 1 & Stage == 'Early' ~ 0.50,
+                                               Scenario == 2 & Stage == 'Early' ~ 0.83,
+                                               Scenario == 3 & Stage == 'Early' ~ 0.17,
+                                               Scenario == 4 & Stage == 'Early' ~ 0.50))
+  mset <- mset %>% group_by(Scenario)
+  mset <- mset %>% mutate(Proportion=if_else(Stage == 'Early',
+                                             Proportion,
+                                             1-sum(Proportion, na.rm=TRUE)))
+  mset <- mset %>% nest(data=-Scenario)
+  mset <- mset %>% mutate(plot=map(data, plot_test_sensitivity_age_stage_experiment))
+  mset <- mset %>% mutate(Scenario=factor(Scenario, levels=c(2, 4, 1, 3)))
+  mset <- mset %>% arrange(Scenario)
+  gg <- ggarrange(plotlist=mset$plot,
+                  nrow=2,
+                  ncol=2,
+                  common.legend=TRUE,
+                  legend='bottom')
+  gg <- gg+bgcolor('white')
+  print(gg)
+  if(saveit){
+    filename <- str_glue('prospective_sensitivity_age_stage_experiments_{datestamp}.{ext}')
+    ggsave(here('plot', filename),
+           plot=gg,
+           height=10,
+           width=12)
+  }
 }
 
 ##################################################
@@ -1114,39 +1321,11 @@ control <- function(N=10000,
   #                                       ext=ext,
   #                                       saveit=saveit)
 
+  # visualize conceptual model of sensitivity
+  plot_test_sensitivity_examples(ext=ext, saveit=saveit)
+
   # visualize how test sensitivity depends on age and clinical stage
-  mset <- expand_grid(Early=c(2, 10),
-                      Late=c(2, 10))
-  mset <- mset %>% mutate(Scenario=seq(n()))
-  mset <- mset %>% pivot_longer(cols=-Scenario,
-                                names_to='Stage',
-                                values_to='MST')
-  mset <- mset %>% mutate(Proportion=case_when(Scenario == 1 & Stage == 'Early' ~ 0.50,
-                                               Scenario == 2 & Stage == 'Early' ~ 0.83,
-                                               Scenario == 3 & Stage == 'Early' ~ 0.17,
-                                               Scenario == 4 & Stage == 'Early' ~ 0.50))
-  mset <- mset %>% group_by(Scenario)
-  mset <- mset %>% mutate(Proportion=if_else(Stage == 'Early',
-                                             Proportion,
-                                             1-sum(Proportion, na.rm=TRUE)))
-  mset <- mset %>% nest(data=-Scenario)
-  mset <- mset %>% mutate(plot=map(data, plot_test_sensitivity_age_stage_experiment))
-  mset <- mset %>% mutate(Scenario=factor(Scenario, levels=c(2, 4, 1, 3)))
-  mset <- mset %>% arrange(Scenario)
-  gg <- ggarrange(plotlist=mset$plot,
-                  nrow=2,
-                  ncol=2,
-                  common.legend=TRUE,
-                  legend='bottom')
-  gg <- gg+bgcolor('white')
-  print(gg)
-  if(saveit){
-    filename <- str_glue('prospective_sensitivity_age_stage_experiments_{datestamp}.{ext}')
-    ggsave(here('plot', filename),
-           plot=gg,
-           height=10,
-           width=12)
-  }
+  plot_test_sensitivity_age_stage_experiment_table(ext=ext, saveit=saveit)
 
   # simulate natural histories
   dset <- expand_grid(test_age, mean_sojourn_time, indolent_rate)
