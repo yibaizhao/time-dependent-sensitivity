@@ -67,7 +67,8 @@ library(ggpmisc)
 #datestamp <- '2024-02-28'
 #datestamp <- '2024-03-11'
 #datestamp <- '2024-03-21'
-datestamp <- '2024-03-24'
+#datestamp <- '2024-03-24'
+datestamp <- '2024-03-25'
 
 set.seed(12345)
 
@@ -114,15 +115,15 @@ plot_test_sensitivity <- function(sojourn_time,
                                   saveit=FALSE){
   sset0 <- tibble(sojourn_time)
   sset1 <- sset0 %>% mutate(sensitivity=map(sojourn_time,
-                                          test_sensitivity,
-                                          onset_sensitivity,
-                                          clinical_sensitivity))
+                                            test_sensitivity,
+                                            onset_sensitivity,
+                                            clinical_sensitivity))
   sset1 <- sset1 %>% unnest(sensitivity)
   sset2 <- sset0 %>% mutate(sensitivity=map(sojourn_time,
-                                         test_sensitivity,
-                                         onset_sensitivity,
-                                         clinical_sensitivity,
-                                         is_indolent=TRUE))
+                                            test_sensitivity,
+                                            onset_sensitivity,
+                                            clinical_sensitivity,
+                                            is_indolent=TRUE))
   sset2 <- sset2 %>% unnest(sensitivity)
   theme_set(theme_classic())
   theme_update(axis.ticks.length=unit(0.2, 'cm'),
@@ -189,18 +190,33 @@ plot_test_sensitivity <- function(sojourn_time,
 plot_test_sensitivity_overall_example <- function(onset_sensitivity=0,
                                                   clinical_sensitivity=0.8,
                                                   test_age=55){
-  dset <- tibble(onset_age=49,
+  pset <- tibble(type='progressive',
+                 onset_age=49,
                  sojourn_time=8,
                  clinical_age=onset_age+sojourn_time)
-  dset <- dset %>% mutate(sensitivity=map(sojourn_time,
+  pset <- pset %>% mutate(sensitivity=map(sojourn_time,
                                           test_sensitivity,
                                           onset_sensitivity,
                                           clinical_sensitivity,
                                           length=100))
-  dset <- dset %>% unnest(sensitivity)
+  pset <- pset %>% unnest(sensitivity)
+  iset <- tibble(type='indolent',
+                 onset_age=49,
+                 sojourn_time=8,
+                 clinical_age=onset_age+sojourn_time)
+  iset <- iset %>% mutate(sensitivity=map(sojourn_time,
+                                          test_sensitivity,
+                                          onset_sensitivity,
+                                          clinical_sensitivity,
+                                          is_indolent=TRUE,
+                                          length=100))
+  iset <- iset %>% unnest(sensitivity)
+  #dset <- bind_rows(pset, iset)
+  dset <- pset
   dset <- dset %>% mutate(age=onset_age+time)
-  # identify prospective sensitivity
-  xset <- dset %>% filter(age == age[which.min(abs(age-test_age))])
+  # identify prospective sensitivity within type
+  xset <- dset %>% group_by(type)
+  xset <- xset %>% filter(age == age[which.min(abs(age-test_age))])
   theme_set(theme_classic())
   theme_update(axis.ticks.length=unit(0.2, 'cm'),
                plot.title=element_text(hjust=0.5),
@@ -213,12 +229,14 @@ plot_test_sensitivity_overall_example <- function(onset_sensitivity=0,
   gg <- gg+annotate('text',
                     x=100,
                     y=clinical_sensitivity,
-                    label=sprintf('Retrospective = %2.0f%%', 100*clinical_sensitivity),
+                    label=sprintf('Diagnostic = %2.0f%%', 100*clinical_sensitivity),
                     color='#25848EFF',
                     hjust=1,
                     vjust=-0.5)
   gg <- gg+geom_line(aes(x=age,
-                         y=sensitivity),
+                         y=sensitivity,
+                         group=type,
+                         linetype=type),
                      color='#25848EFF',
                      linewidth=0.35,
                      show.legend=TRUE)
@@ -237,7 +255,7 @@ plot_test_sensitivity_overall_example <- function(onset_sensitivity=0,
   gg <- gg+geom_text(data=xset,
                      aes(x=60,
                          y=sensitivity,
-                         label=sprintf('Prospective = %2.0f%%', 100*sensitivity)),
+                         label=sprintf('Preclinical = %2.0f%%', 100*sensitivity)),
                      color='#25848EFF',
                      hjust=-0.1,
                      show.legend=FALSE)
@@ -250,6 +268,7 @@ plot_test_sensitivity_overall_example <- function(onset_sensitivity=0,
                               breaks=seq(0, 1, by=0.1),
                               labels=label_percent(accuracy=1),
                               expand=c(0, 0))
+  gg <- gg+scale_linetype_manual(name='', values=c(progressive='solid', indolent='dotted'))
   return(gg)
 }
 
@@ -295,7 +314,7 @@ plot_test_sensitivity_stage_example <- function(onset_sensitivity=0,
                      aes(x=100,
                          y=clinical_sensitivity,
                          color=clinical_stage,
-                         label=sprintf('Retrospective = %2.0f%%', 100*clinical_sensitivity)),
+                         label=sprintf('Diagnostic = %2.0f%%', 100*clinical_sensitivity)),
                      hjust=1,
                      vjust=-0.5,
                      show.legend=FALSE)
@@ -321,7 +340,7 @@ plot_test_sensitivity_stage_example <- function(onset_sensitivity=0,
                      aes(x=60,
                          y=sensitivity,
                          color=clinical_stage,
-                         label=sprintf('Prospective = %2.0f%%', 100*sensitivity)),
+                         label=sprintf('Preclinical = %2.0f%%', 100*sensitivity)),
                      hjust=-0.1,
                      show.legend=FALSE)
   gg <- gg+scale_x_continuous(name='Age (years)',
