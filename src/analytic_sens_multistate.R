@@ -11,7 +11,8 @@ source(here("src", "analytic_sens_multistate_funs.R"))
 # datastamp <- '2024-02-26'
 # datastamp <- '2024-02-28'
 # datastamp <- '2024-03-15'
-datastamp <- '2024-03-21'
+# datastamp <- '2024-03-21'
+datastamp <- '2024-03-29'
 
 # plot prospective sensitivity for test @ between early stage and clinical onset
 fig_prosp_sens <- function(test_time, rate, m1, m2, m3 = NULL,
@@ -127,10 +128,9 @@ fig_prosp_sens <- function(test_time, rate, m1, m2, m3 = NULL,
       scale_y_continuous(breaks = m2, expand = c(0, 0)) + 
       labs(
         title = "Sensitivity in early preclinical stage \nTest at age 55", 
-        x = "MST from early stage to clinical", 
-        y = "MST from early stage to late stage") +
+        x = expression(paste("Mean years from early stage to early clinical (", m[1], ")")), 
+        y = expression(paste("Mean years from early to late stage (", m[2], ")"))) +
       theme(legend.position = "none") 
-    gg2
 
 
     if(saveit){
