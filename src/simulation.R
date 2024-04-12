@@ -19,18 +19,17 @@
 #       3b. How does bias depend on mean sojourn time (0% non-progressive)?
 #       3c. How does bias depend on fraction that are non-progressive?
 ##################################################
-library(tidyverse)
-library(purrrlyr)
-library(viridis)
+library(doParallel)
+library(foreach)
+library(ggpmisc)
+library(ggpubr)
+library(here)
+library(rlang)
 library(scales)
 library(stringr)
-library(here)
-library(foreach)
-library(doParallel)
 library(tidyr)
+library(tidyverse)
 library(viridis)
-library(rlang)
-library(ggpubr)
 
 # datestamp <- '2022-12-12'
 # datestamp <- '2023-01-26'
@@ -64,9 +63,13 @@ library(ggpubr)
 # datestamp <- '2024-02-14'
 #datestamp <- '2024-02-15'
 #datestamp <- '2024-02-28'
-datestamp <- '2024-03-11'
+#datestamp <- '2024-03-11'
+#datestamp <- '2024-03-21'
+#datestamp <- '2024-03-24'
+# datestamp <- '2024-03-25'
+datestamp <- '2024-04-02'
 
-set.seed(1234)
+set.seed(12345)
 
 ##################################################
 # Prospective sensitivity evaluated at specified times
@@ -79,7 +82,8 @@ test_sensitivity <- function(sojourn_time,
                              onset_sensitivity,
                              clinical_sensitivity,
                              is_indolent=FALSE,
-                             time=seq(0, sojourn_time, length=20),
+                             length=20,
+                             time=seq(0, sojourn_time, length=length),
                              method='linear'){
   # alpha=log(1/onset_sensitivity-1)
   # beta=1/sojourn_time*(log(1/clinical_sensitivity-1)-alpha)
@@ -93,9 +97,9 @@ test_sensitivity <- function(sojourn_time,
       beta <- -log(onset_sensitivity/clinical_sensitivity)-alpha
       tset <- tibble(time=time, sensitivity=1/(1+exp(-(alpha+beta/sojourn_time*time))))
     }
-    tset <- tset %>%
-      mutate(sensitivity=ifelse(sensitivity<=clinical_sensitivity, sensitivity, NA),
-             sensitivity=ifelse(time<0|time>sojourn_time, NA, sensitivity))
+    #tset <- tset %>%
+    #  mutate(sensitivity=ifelse(sensitivity<=clinical_sensitivity, sensitivity, NA),
+    #         sensitivity=ifelse(time<0|time>sojourn_time, NA, sensitivity))
   }else{
     tset <- tibble(time=time, 
                    sensitivity=onset_sensitivity+(clinical_sensitivity-onset_sensitivity)*(1-exp(-1/sojourn_time*time)))
@@ -110,15 +114,15 @@ plot_test_sensitivity <- function(sojourn_time,
                                   saveit=FALSE){
   sset0 <- tibble(sojourn_time)
   sset1 <- sset0 %>% mutate(sensitivity=map(sojourn_time,
-                                          test_sensitivity,
-                                          onset_sensitivity,
-                                          clinical_sensitivity))
+                                            test_sensitivity,
+                                            onset_sensitivity,
+                                            clinical_sensitivity))
   sset1 <- sset1 %>% unnest(sensitivity)
   sset2 <- sset0 %>% mutate(sensitivity=map(sojourn_time,
-                                         test_sensitivity,
-                                         onset_sensitivity,
-                                         clinical_sensitivity,
-                                         is_indolent=TRUE))
+                                            test_sensitivity,
+                                            onset_sensitivity,
+                                            clinical_sensitivity,
+                                            is_indolent=TRUE))
   sset2 <- sset2 %>% unnest(sensitivity)
   theme_set(theme_classic())
   theme_update(axis.ticks.length=unit(0.2, 'cm'),
@@ -179,6 +183,194 @@ plot_test_sensitivity <- function(sojourn_time,
            plot=gg,
            height=6,
            width=6)
+  }
+}
+
+plot_test_sensitivity_overall_example <- function(onset_sensitivity=0,
+                                                  clinical_sensitivity=0.8,
+                                                  test_age=55){
+  pset <- tibble(type='progressive',
+                 onset_age=49,
+                 sojourn_time=8,
+                 clinical_age=onset_age+sojourn_time)
+  pset <- pset %>% mutate(sensitivity=map(sojourn_time,
+                                          test_sensitivity,
+                                          onset_sensitivity,
+                                          clinical_sensitivity,
+                                          length=100))
+  pset <- pset %>% unnest(sensitivity)
+  iset <- tibble(type='indolent',
+                 onset_age=49,
+                 sojourn_time=8,
+                 clinical_age=onset_age+sojourn_time)
+  iset <- iset %>% mutate(sensitivity=map(sojourn_time,
+                                          test_sensitivity,
+                                          onset_sensitivity,
+                                          clinical_sensitivity,
+                                          is_indolent=TRUE,
+                                          length=100))
+  iset <- iset %>% unnest(sensitivity)
+  #dset <- bind_rows(pset, iset)
+  dset <- pset
+  dset <- dset %>% mutate(age=onset_age+time)
+  # identify prospective sensitivity within type
+  xset <- dset %>% group_by(type)
+  xset <- xset %>% filter(age == age[which.min(abs(age-test_age))])
+  theme_set(theme_classic())
+  theme_update(axis.ticks.length=unit(0.2, 'cm'),
+               plot.title=element_text(hjust=0.5),
+               legend.position='none')
+  gg <- ggplot(dset)
+  gg <- gg+labs(title='Sensitivity across clinical stages')
+  gg <- gg+geom_hline(yintercept=clinical_sensitivity,
+                      color='#25848EFF',
+                      linetype='dashed')
+  gg <- gg+annotate('text',
+                    x=100,
+                    y=clinical_sensitivity,
+                    label=sprintf('Diagnostic = %2.0f%%', 100*clinical_sensitivity),
+                    color='#25848EFF',
+                    hjust=1,
+                    vjust=-0.5)
+  gg <- gg+geom_line(aes(x=age,
+                         y=sensitivity,
+                         group=type,
+                         linetype=type),
+                     color='#25848EFF',
+                     linewidth=0.35,
+                     show.legend=TRUE)
+  gg <- gg+geom_vline(xintercept=test_age,
+                      linewidth=1.25,
+                      color='orange',
+                      alpha=0.75)
+  gg <- gg+geom_segment(data=xset,
+                        aes(x=60,
+                            xend=age+1,
+                            y=sensitivity,
+                            yend=sensitivity),
+                        color='#25848EFF',
+                        arrow=arrow(length=unit(0.2, 'cm'), type='closed'),
+                        show.legend=FALSE)
+  gg <- gg+geom_text(data=xset,
+                     aes(x=60,
+                         y=sensitivity,
+                         label=sprintf('Preclinical = %2.0f%%', 100*sensitivity)),
+                     color='#25848EFF',
+                     hjust=-0.1,
+                     show.legend=FALSE)
+  gg <- gg+scale_x_continuous(name='Age (years)',
+                              limits=c(40, 100),
+                              breaks=seq(40, 100, by=5),
+                              expand=c(0, 0))
+  gg <- gg+scale_y_continuous(name='Sensitivity',
+                              limits=c(0, 1),
+                              breaks=seq(0, 1, by=0.1),
+                              labels=label_percent(accuracy=1),
+                              expand=c(0, 0))
+  gg <- gg+scale_linetype_manual(name='', values=c(progressive='solid', indolent='dotted'))
+  return(gg)
+}
+
+plot_test_sensitivity_stage_example <- function(onset_sensitivity=0,
+                                                clinical_sensitivity=c(Early=0.3, Late=0.8),
+                                                test_age=55){
+  eset <- tibble(onset_age=48,
+                 clinical_stage='Early',
+                 sojourn_time=10,
+                 clinical_age=onset_age+sojourn_time)
+  eset <- eset %>% mutate(sensitivity=map(sojourn_time,
+                                          test_sensitivity,
+                                          onset_sensitivity,
+                                          clinical_sensitivity['Early'],
+                                          length=100))
+  eset <- eset %>% unnest(sensitivity)
+  lset <- tibble(onset_age=52,
+                 clinical_stage='Late',
+                 sojourn_time=6,
+                 clinical_age=onset_age+sojourn_time)
+  lset <- lset %>% mutate(sensitivity=map(sojourn_time,
+                                          test_sensitivity,
+                                          onset_sensitivity,
+                                          clinical_sensitivity['Late'],
+                                          length=100))
+  lset <- lset %>% unnest(sensitivity)
+  sset <- bind_rows(eset, lset)
+  sset <- sset %>% mutate(age=onset_age+time)
+  # identify prospective sensitivity within stage
+  xset <- sset %>% group_by(clinical_stage)
+  xset <- xset %>% filter(age == age[which.min(abs(age-test_age))])
+  theme_set(theme_classic())
+  theme_update(axis.ticks.length=unit(0.2, 'cm'),
+               plot.title=element_text(hjust=0.5),
+               legend.position='none')
+  gg <- ggplot(sset)
+  gg <- gg+labs(title='Sensitivity within clinical stages')
+  gg <- gg+geom_hline(data=xset,
+                      aes(yintercept=clinical_sensitivity,
+                          color=clinical_stage),
+                      linetype='dashed')
+  gg <- gg+geom_text(data=xset,
+                     aes(x=100,
+                         y=clinical_sensitivity,
+                         color=clinical_stage,
+                         label=sprintf('Diagnostic = %2.0f%%', 100*clinical_sensitivity)),
+                     hjust=1,
+                     vjust=-0.5,
+                     show.legend=FALSE)
+  gg <- gg+geom_line(aes(x=age,
+                         y=sensitivity,
+                         group=clinical_stage,
+                         color=clinical_stage),
+                     linewidth=0.35,
+                     show.legend=TRUE)
+  gg <- gg+geom_vline(xintercept=test_age,
+                      linewidth=1.25,
+                      color='orange',
+                      alpha=0.75)
+  gg <- gg+geom_segment(data=xset,
+                        aes(x=60,
+                            xend=age+1,
+                            y=sensitivity,
+                            yend=sensitivity,
+                            color=clinical_stage),
+                        arrow=arrow(length=unit(0.2, 'cm'), type='closed'),
+                        show.legend=FALSE)
+  gg <- gg+geom_text(data=xset,
+                     aes(x=60,
+                         y=sensitivity,
+                         color=clinical_stage,
+                         label=sprintf('Preclinical = %2.0f%%', 100*sensitivity)),
+                     hjust=-0.1,
+                     show.legend=FALSE)
+  gg <- gg+scale_x_continuous(name='Age (years)',
+                              limits=c(40, 100),
+                              breaks=seq(40, 100, by=5),
+                              expand=c(0, 0))
+  gg <- gg+scale_y_continuous(name='Sensitivity',
+                              limits=c(0, 1),
+                              breaks=seq(0, 1, by=0.1),
+                              labels=label_percent(accuracy=1),
+                              expand=c(0, 0))
+  gg <- gg+scale_color_viridis(name='Clinical\nstage',
+                               discrete=TRUE,
+                               begin=0.65,
+                               end=0.25)
+  gg <- gg+guides(col=guide_legend(override.aes=list(linewidth=1, alpha=1)))
+  return(gg)
+}
+
+plot_test_sensitivity_examples <- function(ext='png', saveit=FALSE){
+  go <- plot_test_sensitivity_overall_example()
+  gs <- plot_test_sensitivity_stage_example()
+  gg <- ggarrange(go, gs, nrow=1)
+  gg <- gg+bgcolor('white')
+  print(gg)
+  if(saveit){
+    filename <- str_glue('prospective_sensitivity_examples_{datestamp}.{ext}')
+    ggsave(here('plot', filename),
+           plot=gg,
+           height=6,
+           width=12)
   }
 }
 
@@ -316,44 +508,53 @@ plot_test_sensitivity_stage_experiment <- function(mst=c(etoc=6, etol=4),
 
 plot_test_sensitivity_age_stage_experiment <- function(dset,
                                                        onset_sensitivity=0,
-                                                       clinical_sensitivity=c(early=0.3, late=0.8),
+                                                       clinical_sensitivity=c(Early=0.3, Late=0.8),
                                                        test_age=55,
                                                        age=40,
                                                        mht=10,
                                                        size=400,
                                                        ext='png',
                                                        saveit=FALSE){
-  svec <- unlist(dset)
-  dset <- tibble(id=seq(size),
+  oset <- tibble(id=seq(size),
                  onset_age=age+rexp(size, rate=1/mht),
-                 clinical_stage=rbinom(n=size, size=1, prob=svec['prob_early']))
-  dset <- dset %>% mutate(clinical_stage=factor(clinical_stage,
+                 clinical_stage=rbinom(n=size,
+                                       size=1,
+                                       prob=with(dset, Proportion[Stage == 'Early'])))
+  oset <- oset %>% mutate(clinical_stage=factor(clinical_stage,
                                                 levels=c(1, 0),
-                                                labels=c('early', 'late')))
-  eset <- dset %>% filter(clinical_stage == 'early')
-  eset <- eset %>% mutate(sojourn_time=rexp(length(id), rate=1/svec['etoc']),
+                                                labels=c('Early', 'Late')))
+  eset <- oset %>% filter(clinical_stage == 'Early')
+  eset <- eset %>% mutate(sojourn_time=rexp(length(id), rate=1/with(dset, MST[Stage == 'Early'])),
                           clinical_age=onset_age+sojourn_time)
   eset <- eset %>% mutate(sensitivity=map(sojourn_time,
                                           test_sensitivity,
                                           onset_sensitivity,
-                                          clinical_sensitivity['early']))
+                                          clinical_sensitivity['Early']))
   eset <- eset %>% unnest(sensitivity)
-  lset <- dset %>% filter(clinical_stage == 'late')
-  lset <- lset %>% mutate(sojourn_time=rexp(length(id), rate=1/svec['etol']),
+  lset <- oset %>% filter(clinical_stage == 'Late')
+  lset <- lset %>% mutate(sojourn_time=rexp(length(id), rate=1/with(dset, MST[Stage == 'Late'])),
                           clinical_age=onset_age+sojourn_time)
   lset <- lset %>% mutate(sensitivity=map(sojourn_time,
                                           test_sensitivity,
                                           onset_sensitivity,
-                                          clinical_sensitivity['late']))
+                                          clinical_sensitivity['Late']))
   lset <- lset %>% unnest(sensitivity)
   sset <- bind_rows(eset, lset)
   sset <- sset %>% mutate(age=onset_age+time)
   sset <- sset %>% group_by(id)
   sset <- sset %>% mutate(detected=onset_age <= test_age & test_age < clinical_age)
+  # calculate empirical sensitivity within stage
   xset <- sset %>% filter(detected)
   xset <- xset %>% filter(age == age[which.min(abs(age-test_age))])
   xset <- xset %>% ungroup()
-  cat('Empirical sensitivity:', xset %>% with(mean(sensitivity, na.rm=TRUE)), '\n')
+  xset <- xset %>% group_by(Stage=clinical_stage)
+  xset <- xset %>% summarize(Sensitivity=mean(sensitivity))
+  tset <- full_join(dset, xset, by='Stage')
+  tset <- tset %>% mutate(Proportion=sprintf('%4.2f', Proportion),
+                          Sensitivity=sprintf('%4.2f', Sensitivity))
+  gt_theme <- gridExtra::ttheme_minimal()
+  cols <- c('#2FB47CFF', '#3B528BFF')
+  gt_theme$core$fg_params$col <- cols
   theme_set(theme_classic())
   theme_update(axis.ticks.length=unit(0.2, 'cm'),
                legend.position='bottom')
@@ -366,24 +567,17 @@ plot_test_sensitivity_age_stage_experiment <- function(dset,
                          alpha=detected),
                      linewidth=0.35,
                      show.legend=c(color=TRUE, alpha=FALSE))
-  gg <- gg+annotate('text',
-                    x=60,
-                    y=0.95,
-                    vjust=0.5,
-                    hjust=0,
-                    label=str_glue('MST from early stage to clinical diagnosis: {svec["etoc"]} years'),
-                    color='#2FB47CFF')
-  gg <- gg+annotate('text',
-                    x=60,
-                    y=0.85,
-                    vjust=0.5,
-                    hjust=0,
-                    label=str_glue('MST from early stage to late stage: {svec["etol"]} years'),
-                    color='#3B528BFF')
   gg <- gg+geom_vline(xintercept=test_age,
-                      size=1.25,
+                      linewidth=1.25,
                       color='orange',
                       alpha=0.75)
+  gg <- gg+annotate(geom='table',
+                    x=100,
+                    y=1,
+                    vjust=1,
+                    hjust=1,
+                    label=list(tset),
+                    table.theme=gt_theme)
   gg <- gg+scale_x_continuous(name='Age (years)',
                               limits=c(40, 100),
                               breaks=seq(40, 100, by=5),
@@ -408,6 +602,41 @@ plot_test_sensitivity_age_stage_experiment <- function(dset,
            width=8)
   }
   return(gg)
+}
+
+plot_test_sensitivity_age_stage_experiment_table <- function(ext='png', saveit=FALSE){
+  mset <- expand_grid(Early=c(2, 10),
+                      Late=c(2, 10))
+  mset <- mset %>% mutate(Scenario=seq(n()))
+  mset <- mset %>% pivot_longer(cols=-Scenario,
+                                names_to='Stage',
+                                values_to='MST')
+  mset <- mset %>% mutate(Proportion=case_when(Scenario == 1 & Stage == 'Early' ~ 0.50,
+                                               Scenario == 2 & Stage == 'Early' ~ 0.83,
+                                               Scenario == 3 & Stage == 'Early' ~ 0.17,
+                                               Scenario == 4 & Stage == 'Early' ~ 0.50))
+  mset <- mset %>% group_by(Scenario)
+  mset <- mset %>% mutate(Proportion=if_else(Stage == 'Early',
+                                             Proportion,
+                                             1-sum(Proportion, na.rm=TRUE)))
+  mset <- mset %>% nest(data=-Scenario)
+  mset <- mset %>% mutate(plot=map(data, plot_test_sensitivity_age_stage_experiment))
+  mset <- mset %>% mutate(Scenario=factor(Scenario, levels=c(2, 4, 1, 3)))
+  mset <- mset %>% arrange(Scenario)
+  gg <- ggarrange(plotlist=mset$plot,
+                  nrow=2,
+                  ncol=2,
+                  common.legend=TRUE,
+                  legend='bottom')
+  gg <- gg+bgcolor('white')
+  print(gg)
+  if(saveit){
+    filename <- str_glue('prospective_sensitivity_age_stage_experiments_{datestamp}.{ext}')
+    ggsave(here('plot', filename),
+           plot=gg,
+           height=10,
+           width=12)
+  }
 }
 
 ##################################################
@@ -443,10 +672,10 @@ prospective_test_sensitivity <- function(N,
   cset <- dset %>% filter(is.finite(clinical_age))
   cset <- cset %>% group_by(sojourn_time, indolent) %>%
     mutate(retro_sens=test_sensitivity(sojourn_time=sojourn_time,
-                                                      onset_sensitivity,
-                                                      clinical_sensitivity,
-                                                      is_indolent=indolent,
-                                                      time=sojourn_time)$sensitivity) %>%
+                                       onset_sensitivity,
+                                       clinical_sensitivity,
+                                       is_indolent=indolent,
+                                       time=sojourn_time)$sensitivity) %>%
     ungroup()
   cset <- cset %>% mutate(retro_sens=ifelse(is.na(retro_sens), clinical_sensitivity, retro_sens))
   # ccheck <- cset %>% with(all(retro_sens == clinical_sensitivity))
@@ -454,9 +683,9 @@ prospective_test_sensitivity <- function(N,
   # calculate true prospective test sensitivity among preclinical at test age
   pset <- dset %>% filter(onset_age <= !!test_age & !!test_age < clinical_age)
   pset <- pset %>% mutate(prosp_sens_all=test_sensitivity(sojourn_time=sojourn_time,
-                                                      onset_sensitivity,
-                                                      clinical_sensitivity,
-                                                      time=test_age-onset_age)$sensitivity)
+                                                          onset_sensitivity,
+                                                          clinical_sensitivity,
+                                                          time=test_age-onset_age)$sensitivity)
   # update indolent sensitivity
   pset <- pset %>% mutate(prosp_sens_all=case_when(indolent==1~test_sensitivity(sojourn_time=sojourn_time,
                                                                                 onset_sensitivity=onset_sensitivity,
@@ -473,7 +702,7 @@ prospective_test_sensitivity <- function(N,
   }
   # estimate prospective sensitivity for clinical significant cancer
   pset <- pset %>% mutate(prosp_sens_sig=ifelse(indolent==0, (1-indolent_rate)*prosp_sens_all, NA))
-
+  
   pcheck <- pcheck %>% with(all(between(prosp_sens_all,
                                         onset_sensitivity,
                                         clinical_sensitivity)))
@@ -564,7 +793,7 @@ h <- function(t, s, u, t0, onset_sensitivity, clinical_sensitivity){
 f_h <- function(u, s, t0, t, preonset_rate, onset_sensitivity, clinical_sensitivity){
   f(u, preonset_rate)*h(t, s, u, t0, onset_sensitivity, clinical_sensitivity)[2]
 }
-  
+
 h_g <- function(s, t, u, t0, onset_sensitivity, clinical_sensitivity, mean_sojourn_time, indolent=FALSE){
   if(indolent){
     return(h(t, s, u, t0, onset_sensitivity, clinical_sensitivity)[2]*g(s, mean_sojourn_time))
@@ -651,14 +880,14 @@ prospective_sens_denom <- function(t, t0, preonset_rate, mean_sojourn_time, indo
 
 
 prospective_sens_analyt <- function(start_age,
-                             test_age,
-                             preonset_rate,
-                             mean_sojourn_time,
-                             onset_sensitivity,
-                             clinical_sensitivity,
-                             indolent_rate,
-                             confirmation_test_rate=1,
-                             confirmation_test_sensitivity=1){
+                                    test_age,
+                                    preonset_rate,
+                                    mean_sojourn_time,
+                                    onset_sensitivity,
+                                    clinical_sensitivity,
+                                    indolent_rate,
+                                    confirmation_test_rate=1,
+                                    confirmation_test_sensitivity=1){
   
   numerator <- prospective_sens_num(t=test_age, 
                                     t0=start_age,
@@ -673,7 +902,7 @@ prospective_sens_analyt <- function(start_age,
                                         preonset_rate=preonset_rate, 
                                         mean_sojourn_time=mean_sojourn_time, 
                                         indolent_rate=indolent_rate)    
-    
+  
   return(confirmation_test_rate*confirmation_test_sensitivity*numerator/denomerator)
 }
 
@@ -698,16 +927,16 @@ sens_compare <- function(N,
                          indolent_rate,
                          confirmation_test_rate,
                          confirmation_test_sensitivity
-  ){
+){
   analytic_sens <- prospective_sens_analyt(start_age=start_age,
-                                    test_age=test_age,
-                                    preonset_rate=preonset_rate,
-                                    mean_sojourn_time=mean_sojourn_time,
-                                    onset_sensitivity=onset_sensitivity,
-                                    clinical_sensitivity=clinical_sensitivity,
-                                    indolent_rate=indolent_rate,
-                                    confirmation_test_rate=confirmation_test_rate,
-                                    confirmation_test_sensitivity=confirmation_test_sensitivity)
+                                           test_age=test_age,
+                                           preonset_rate=preonset_rate,
+                                           mean_sojourn_time=mean_sojourn_time,
+                                           onset_sensitivity=onset_sensitivity,
+                                           clinical_sensitivity=clinical_sensitivity,
+                                           indolent_rate=indolent_rate,
+                                           confirmation_test_rate=confirmation_test_rate,
+                                           confirmation_test_sensitivity=confirmation_test_sensitivity)
   
   sim_sens_tb <- prospective_test_sensitivity(N=N,
                                               start_age=start_age,
@@ -801,7 +1030,7 @@ plot_sens_compare <- function(N=1000,
     print(gg2)
   }
   # compare confirmation test
-
+  
   if(saveit){
     filename <- str_glue('fig_sens_compare_{datestamp}.{ext}')
     ggsave(here('plot', filename),
@@ -829,9 +1058,10 @@ plot_sens_compare <- function(N=1000,
 plot_prospective_sensitivity <- function(dset,
                                          clinical_sensitivity,
                                          significant_cancer_only=FALSE,
+                                         varname,
                                          ext='png',
                                          saveit=FALSE){
-  varname <- names(dset)[1]
+  # varname <- names(dset)[1]
   varlabel <- switch(varname,
                      test_age='Age at screening test (years)',
                      mean_sojourn_time='Mean sojourn time (years)',
@@ -850,12 +1080,14 @@ plot_prospective_sensitivity <- function(dset,
                           position=position_dodge(width=0.4))
     gg <- gg+ylab('Prospective sensitivity of detecting progressive cancer')
   } else {
-    gg <- gg+geom_boxplot(aes_string(x=varname, y='prosp_sens_all'),
-                          fill='gray',
-                          width=1/2,
-                          position=position_dodge(width=0.4))
-    gg <- gg+ylab('Prospective sensitivity')
+    gg <- gg+geom_bar(aes_string(x=varname, y='prosp_sens_all'),
+                      stat="identity",
+                      fill='gray',
+                      width=1/2,
+                      position=position_dodge(width=0.4))
+    gg <- gg+ylab('Overall pre-clinical sensitivity')
   }
+  gg <- gg+labs(title=str_glue("Test at age ", unique(as.character(dset$test_age))))
   gg <- gg+scale_x_discrete(name=varlabel)
   gg <- gg+scale_y_continuous(limits=c(0, 1),
                               breaks=seq(0, 1, by=0.2),
@@ -928,13 +1160,13 @@ plot_prospective_sensitivity_compare <- function(N,
                           #                                     levels=c('Confirmation test\nsensitivity 60%',
                           #                                              'Confirmation test\nsensitivity 80%',
                           #                                              'Confirmation test\nsensitivity 100%'))
-                          )
+  )
   dset <- dset %>% mutate( 
     confirmation_test_rate=factor(paste('Confirmation test\nfrequency/sensitivity', 
                                         sprintf('%2.0f%%', 100*confirmation_test_rate)),
                                   levels=paste('Confirmation test\nfrequency/sensitivity', 
                                                sprintf('%2.0f%%', 100*sort(unique(dset$confirmation_test_rate), decreasing=FALSE)))
-                                  ))
+    ))
   
   theme_set(theme_classic())
   theme_update(axis.ticks.length=unit(0.2, 'cm'),
@@ -950,14 +1182,14 @@ plot_prospective_sensitivity_compare <- function(N,
                     stat='identity',
                     position=position_dodge2(width=1))
   gg <- gg+geom_linerange(aes(#xmin=test_age,
-                              ymin=mean_prosp_sens,
-                              x=test_age,
-                              #y=mean_prosp_sens,
-                              #xmax=test_age,
-                              ymax=clinical_sensitivity,
-                              color=mean_sojourn_time),
-                          alpha=0.3,
-                          position=position_dodge2(width=1))
+    ymin=mean_prosp_sens,
+    x=test_age,
+    #y=mean_prosp_sens,
+    #xmax=test_age,
+    ymax=clinical_sensitivity,
+    color=mean_sojourn_time),
+    alpha=0.3,
+    position=position_dodge2(width=1))
   gg <- gg+geom_label(aes(x=test_age,
                           y=mean_prosp_sens+degradation/2,
                           label=sprintf('-%2.0f%%', 100*degradation),
@@ -979,8 +1211,8 @@ plot_prospective_sensitivity_compare <- function(N,
   # gg <- gg+scale_color_viridis(name='Mean sojourn\ntime (years)', discrete=TRUE)
   # gg <- gg+scale_fill_viridis(name='Mean sojourn\ntime (years)', discrete=TRUE)
   gg <- gg+scale_color_manual(name = 'Mean sojourn\ntime (years)',
-                             values = setNames(c("grey10", "grey40", "grey70"), 
-                                               levels(dset$mean_sojourn_time)))
+                              values = setNames(c("grey10", "grey40", "grey70"), 
+                                                levels(dset$mean_sojourn_time)))
   gg <- gg+scale_fill_manual(name = 'Mean sojourn\ntime (years)',
                              values = setNames(c("grey10", "grey40", "grey70"), 
                                                levels(dset$mean_sojourn_time)))
@@ -998,11 +1230,11 @@ plot_prospective_sensitivity_compare <- function(N,
 # Estimate confidence interval of prospective sensitivity estimates from simulation
 ##################################################
 summary_stats <- function(dset, 
-                         start_age, 
-                         onset_sensitivity,
-                         clinical_sensitivity,
-                         preonset_rate,
-                         alpha){
+                          start_age, 
+                          onset_sensitivity,
+                          clinical_sensitivity,
+                          preonset_rate,
+                          alpha){
   # summary statistics
   sset <- 
     dset %>%
@@ -1024,12 +1256,12 @@ summary_stats <- function(dset,
   sset <- sset %>% 
     group_by(test_age, mean_sojourn_time, indolent_rate) %>% 
     mutate(prosp_sens=prospective_sens_analyt(start_age=!!start_age,
-                                test_age=test_age,
-                                onset_sensitivity=!!onset_sensitivity,
-                                clinical_sensitivity=!!clinical_sensitivity,
-                                preonset_rate=!!preonset_rate,
-                                mean_sojourn_time=mean_sojourn_time,
-                                indolent_rate=indolent_rate))
+                                              test_age=test_age,
+                                              onset_sensitivity=!!onset_sensitivity,
+                                              clinical_sensitivity=!!clinical_sensitivity,
+                                              preonset_rate=!!preonset_rate,
+                                              mean_sojourn_time=mean_sojourn_time,
+                                              indolent_rate=indolent_rate))
   return(sset)
 }
 
@@ -1042,11 +1274,11 @@ summary_plot <- function(dset,
                          ext,
                          saveit){
   sset <- summary_stats(dset,
-                start_age, 
-                onset_sensitivity,
-                clinical_sensitivity,
-                preonset_rate,
-                alpha)
+                        start_age, 
+                        onset_sensitivity,
+                        clinical_sensitivity,
+                        preonset_rate,
+                        alpha)
   
   label_test_age <- paste0("Test age: ", unique(sset$test_age))
   names(label_test_age) <- unique(sset$test_age)
@@ -1077,14 +1309,17 @@ summary_plot <- function(dset,
 # Control analysis
 ##################################################
 control <- function(N=10000,
-                    preonset_rate=0.1,
-                    mean_sojourn_time=c(2, 5, 10),
-                    indolent_rate=c(0, 0.2, 0.4),
-                    confirmation_test_rate=c(0.4, 0.6, 1),
-                    confirmation_test_sensitivity=c(0.6, 0.8, 1),
+                    preonset_rate=1/50,
+                    mean_sojourn_time=c(2, 6, 10),
+                    # indolent_rate=c(0, 0.2, 0.4),
+                    indolent_rate=0,
+                    # confirmation_test_rate=c(0.4, 0.6, 1),
+                    confirmation_test_rate=1,
+                    # confirmation_test_sensitivity=c(0.6, 0.8, 1),
+                    confirmation_test_sensitivity=1,
                     start_age=40,
-                    test_age=seq(50, 70, by=10),
-                    onset_sensitivity=0.2,
+                    test_age=seq(50, 70, by=5),
+                    onset_sensitivity=0,
                     clinical_sensitivity=0.8,
                     ext='png',
                     saveit=FALSE){
@@ -1094,7 +1329,7 @@ control <- function(N=10000,
   #                      clinical_sensitivity,
   #                      ext=ext,
   #                      saveit=saveit)
-
+  
   # visualize how test sensitivity depends on clinical stage
   #plot_test_sensitivity_stage(sojourn_time=tibble(early=seq(2, 6),
   #                                                late=seq(6, 10)),
@@ -1102,51 +1337,35 @@ control <- function(N=10000,
   #                            clinical_sensitivity=c(early=0.3, late=0.8),
   #                            ext=ext,
   #                            saveit=saveit)
-
+  
   # visualize how test sensitivity depends on clinical stage
   #plot_test_sensitivity_stage_experiment(mst=c(etoc=6, etol=4),
   #                                       onset_sensitivity=0,
   #                                       clinical_sensitivity=c(early=0.3, late=0.8),
   #                                       ext=ext,
   #                                       saveit=saveit)
-
+  
+  # visualize conceptual model of sensitivity
+  plot_test_sensitivity_examples(ext=ext, saveit=saveit)
+  
   # visualize how test sensitivity depends on age and clinical stage
-  mset <- expand_grid(etoc=c(2, 10),
-                      etol=c(2, 10))
-  mset <- mset %>% mutate(prob_early=case_when(etoc == 2 & etol == 2 ~ 0.55,
-                                               etoc == 2 & etol == 10 ~ 0.84,
-                                               etoc == 10 & etol == 2 ~ 0.15,
-                                               etoc == 10 & etol == 10 ~ 0.51))
-  mset <- mset %>% by_row(..f=plot_test_sensitivity_age_stage_experiment, .to='plot')
-  mset <- mset %>% arrange(desc(etol), etoc)
-  gg <- ggarrange(plotlist=mset$plot,
-                  nrow=2,
-                  ncol=2,
-                  common.legend=TRUE,
-                  legend='bottom')
-  gg <- gg+bgcolor('white')
-  if(saveit){
-    filename <- str_glue('prospective_sensitivity_age_stage_experiments_{datestamp}.{ext}')
-    ggsave(here('plot', filename),
-           plot=gg,
-           height=8,
-           width=14)
-  }
-
+  plot_test_sensitivity_age_stage_experiment_table(ext=ext, saveit=saveit)
+  
   # simulate natural histories
   dset <- expand_grid(test_age, mean_sojourn_time, indolent_rate)
   dset <- dset %>% group_by(test_age, mean_sojourn_time, indolent_rate)
-  dset <- dset %>% mutate(results=prospective_test_sensitivity(N=N,
-                                                               start_age=start_age,
-                                                               preonset_rate=preonset_rate,
-                                                               mean_sojourn_time=mean_sojourn_time,
-                                                               indolent_rate=indolent_rate,
-                                                               test_age=test_age,
-                                                               onset_sensitivity=onset_sensitivity,
-                                                               clinical_sensitivity=clinical_sensitivity,
-                                                               confirmation_test_rate=confirmation_test_rate,
-                                                               confirmation_test_sensitivity=confirmation_test_sensitivity)[[1]])
-  dset <- dset %>% unnest(results)
+  dset <- dset %>% mutate(prosp_sens_all=
+                            prospective_sens_analyt(start_age=start_age,
+                                                    test_age=test_age,
+                                                    preonset_rate=preonset_rate,
+                                                    mean_sojourn_time=mean_sojourn_time,
+                                                    onset_sensitivity=onset_sensitivity,
+                                                    clinical_sensitivity=clinical_sensitivity,
+                                                    indolent_rate=indolent_rate,
+                                                    confirmation_test_rate=confirmation_test_rate,
+                                                    confirmation_test_sensitivity=confirmation_test_sensitivity)
+  )
+  dset <- dset %>% unnest(prosp_sens_all)
   dset <- dset %>% ungroup()
   # how does bias depend on testing age (mst 5, 0% non-progressive)?
   dset_test_age <- dset %>% filter(mean_sojourn_time==5)
@@ -1156,12 +1375,11 @@ control <- function(N=10000,
                                clinical_sensitivity,
                                ext=ext,
                                saveit=saveit)
-  # how does bias depend on mean sojourn time (0% non-progressive, age 50)?
-  dset_sojourn_time <- dset %>% filter(test_age==50)
-  dset_sojourn_time <- dset_sojourn_time %>% filter(indolent_rate==0)
-  dset_sojourn_time <- dset_sojourn_time %>% select(-test_age, -sojourn_time)
+  # how does bias depend on mean sojourn time (0% non-progressive, age 55)?
+  dset_sojourn_time <- dset %>% filter(test_age==55)
   plot_prospective_sensitivity(dset_sojourn_time,
                                clinical_sensitivity,
+                               varname = "mean_sojourn_time",
                                ext=ext,
                                saveit=saveit)
   # how does bias depend on fraction that are non-progressive (mst 2, age 50)?
@@ -1217,7 +1435,7 @@ control <- function(N=10000,
                                clinical_sensitivity,
                                ext=ext,
                                saveit=saveit)
-
+  
   # compare different method of sensitivity
   plot_sens_compare(N=1000,
                     start_age=40,
@@ -1255,8 +1473,8 @@ control <- function(N=10000,
   plot_prospective_sensitivity_compare(N=N,
                                        dset=dset,
                                        start_age=40,
-                                       preonset_rate=0.1,
-                                       onset_sensitivity=0.2,
+                                       preonset_rate=1/50,
+                                       onset_sensitivity=0,
                                        clinical_sensitivity=0.8,
                                        method='analytic',
                                        ext=ext,
@@ -1282,4 +1500,3 @@ control <- function(N=10000,
                saveit)
 }
 control(saveit=TRUE)
-
