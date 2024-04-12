@@ -19,19 +19,23 @@
 #       3b. How does bias depend on mean sojourn time (0% non-progressive)?
 #       3c. How does bias depend on fraction that are non-progressive?
 ##################################################
-library(tidyverse)
-library(purrrlyr)
-library(viridis)
+library(doParallel)
+library(foreach)
+library(ggpmisc)
+library(ggpubr)
+library(here)
+library(rlang)
 library(scales)
 library(stringr)
-library(here)
-library(foreach)
-library(doParallel)
 library(tidyr)
+library(tidyverse)
 library(viridis)
-library(rlang)
+<<<<<<< HEAD
+=======
+  library(rlang)
 library(ggpubr)
 library(ggpmisc)
+>>>>>>> 2c44ba62adb18b720a513e0bbbd0cbf454a0a9ca
 
 # datestamp <- '2022-12-12'
 # datestamp <- '2023-01-26'
@@ -68,7 +72,12 @@ library(ggpmisc)
 #datestamp <- '2024-03-11'
 #datestamp <- '2024-03-21'
 #datestamp <- '2024-03-24'
-datestamp <- '2024-03-25'
+<<<<<<< HEAD
+# datestamp <- '2024-03-25'
+datestamp <- '2024-04-02'
+=======
+  datestamp <- '2024-03-25'
+>>>>>>> 2c44ba62adb18b720a513e0bbbd0cbf454a0a9ca
 
 set.seed(12345)
 
@@ -1059,9 +1068,10 @@ plot_sens_compare <- function(N=1000,
 plot_prospective_sensitivity <- function(dset,
                                          clinical_sensitivity,
                                          significant_cancer_only=FALSE,
+                                         varname,
                                          ext='png',
                                          saveit=FALSE){
-  varname <- names(dset)[1]
+  # varname <- names(dset)[1]
   varlabel <- switch(varname,
                      test_age='Age at screening test (years)',
                      mean_sojourn_time='Mean sojourn time (years)',
@@ -1080,12 +1090,14 @@ plot_prospective_sensitivity <- function(dset,
                           position=position_dodge(width=0.4))
     gg <- gg+ylab('Prospective sensitivity of detecting progressive cancer')
   } else {
-    gg <- gg+geom_boxplot(aes_string(x=varname, y='prosp_sens_all'),
-                          fill='gray',
-                          width=1/2,
-                          position=position_dodge(width=0.4))
-    gg <- gg+ylab('Prospective sensitivity')
+    gg <- gg+geom_bar(aes_string(x=varname, y='prosp_sens_all'),
+                      stat="identity",
+                      fill='gray',
+                      width=1/2,
+                      position=position_dodge(width=0.4))
+    gg <- gg+ylab('Overall pre-clinical sensitivity')
   }
+  gg <- gg+labs(title=str_glue("Test at age ", unique(as.character(dset$test_age))))
   gg <- gg+scale_x_discrete(name=varlabel)
   gg <- gg+scale_y_continuous(limits=c(0, 1),
                               breaks=seq(0, 1, by=0.2),
@@ -1307,14 +1319,17 @@ summary_plot <- function(dset,
 # Control analysis
 ##################################################
 control <- function(N=10000,
-                    preonset_rate=0.1,
-                    mean_sojourn_time=c(2, 5, 10),
-                    indolent_rate=c(0, 0.2, 0.4),
-                    confirmation_test_rate=c(0.4, 0.6, 1),
-                    confirmation_test_sensitivity=c(0.6, 0.8, 1),
+                    preonset_rate=1/50,
+                    mean_sojourn_time=c(2, 6, 10),
+                    # indolent_rate=c(0, 0.2, 0.4),
+                    indolent_rate=0,
+                    # confirmation_test_rate=c(0.4, 0.6, 1),
+                    confirmation_test_rate=1,
+                    # confirmation_test_sensitivity=c(0.6, 0.8, 1),
+                    confirmation_test_sensitivity=1,
                     start_age=40,
-                    test_age=seq(50, 70, by=10),
-                    onset_sensitivity=0.2,
+                    test_age=seq(50, 70, by=5),
+                    onset_sensitivity=0,
                     clinical_sensitivity=0.8,
                     ext='png',
                     saveit=FALSE){
@@ -1339,6 +1354,7 @@ control <- function(N=10000,
   #                                       clinical_sensitivity=c(early=0.3, late=0.8),
   #                                       ext=ext,
   #                                       saveit=saveit)
+  <<<<<<< HEAD
   
   # visualize conceptual model of sensitivity
   plot_test_sensitivity_examples(ext=ext, saveit=saveit)
@@ -1346,20 +1362,30 @@ control <- function(N=10000,
   # visualize how test sensitivity depends on age and clinical stage
   plot_test_sensitivity_age_stage_experiment_table(ext=ext, saveit=saveit)
   
+  =======
+    
+    # visualize conceptual model of sensitivity
+    plot_test_sensitivity_examples(ext=ext, saveit=saveit)
+  
+  # visualize how test sensitivity depends on age and clinical stage
+  plot_test_sensitivity_age_stage_experiment_table(ext=ext, saveit=saveit)
+  
+  >>>>>>> 2c44ba62adb18b720a513e0bbbd0cbf454a0a9ca
   # simulate natural histories
   dset <- expand_grid(test_age, mean_sojourn_time, indolent_rate)
   dset <- dset %>% group_by(test_age, mean_sojourn_time, indolent_rate)
-  dset <- dset %>% mutate(results=prospective_test_sensitivity(N=N,
-                                                               start_age=start_age,
-                                                               preonset_rate=preonset_rate,
-                                                               mean_sojourn_time=mean_sojourn_time,
-                                                               indolent_rate=indolent_rate,
-                                                               test_age=test_age,
-                                                               onset_sensitivity=onset_sensitivity,
-                                                               clinical_sensitivity=clinical_sensitivity,
-                                                               confirmation_test_rate=confirmation_test_rate,
-                                                               confirmation_test_sensitivity=confirmation_test_sensitivity)[[1]])
-  dset <- dset %>% unnest(results)
+  dset <- dset %>% mutate(prosp_sens_all=
+                            prospective_sens_analyt(start_age=start_age,
+                                                    test_age=test_age,
+                                                    preonset_rate=preonset_rate,
+                                                    mean_sojourn_time=mean_sojourn_time,
+                                                    onset_sensitivity=onset_sensitivity,
+                                                    clinical_sensitivity=clinical_sensitivity,
+                                                    indolent_rate=indolent_rate,
+                                                    confirmation_test_rate=confirmation_test_rate,
+                                                    confirmation_test_sensitivity=confirmation_test_sensitivity)
+  )
+  dset <- dset %>% unnest(prosp_sens_all)
   dset <- dset %>% ungroup()
   # how does bias depend on testing age (mst 5, 0% non-progressive)?
   dset_test_age <- dset %>% filter(mean_sojourn_time==5)
@@ -1369,12 +1395,11 @@ control <- function(N=10000,
                                clinical_sensitivity,
                                ext=ext,
                                saveit=saveit)
-  # how does bias depend on mean sojourn time (0% non-progressive, age 50)?
-  dset_sojourn_time <- dset %>% filter(test_age==50)
-  dset_sojourn_time <- dset_sojourn_time %>% filter(indolent_rate==0)
-  dset_sojourn_time <- dset_sojourn_time %>% select(-test_age, -sojourn_time)
+  # how does bias depend on mean sojourn time (0% non-progressive, age 55)?
+  dset_sojourn_time <- dset %>% filter(test_age==55)
   plot_prospective_sensitivity(dset_sojourn_time,
                                clinical_sensitivity,
+                               varname = "mean_sojourn_time",
                                ext=ext,
                                saveit=saveit)
   # how does bias depend on fraction that are non-progressive (mst 2, age 50)?
@@ -1468,8 +1493,8 @@ control <- function(N=10000,
   plot_prospective_sensitivity_compare(N=N,
                                        dset=dset,
                                        start_age=40,
-                                       preonset_rate=0.1,
-                                       onset_sensitivity=0.2,
+                                       preonset_rate=1/50,
+                                       onset_sensitivity=0,
                                        clinical_sensitivity=0.8,
                                        method='analytic',
                                        ext=ext,
