@@ -32,7 +32,7 @@ library(tidyverse)
 library(viridis)
 <<<<<<< HEAD
 =======
-  library(rlang)
+library(rlang)
 library(ggpubr)
 library(ggpmisc)
 >>>>>>> 2c44ba62adb18b720a513e0bbbd0cbf454a0a9ca
@@ -72,12 +72,9 @@ library(ggpmisc)
 #datestamp <- '2024-03-11'
 #datestamp <- '2024-03-21'
 #datestamp <- '2024-03-24'
-<<<<<<< HEAD
 # datestamp <- '2024-03-25'
-datestamp <- '2024-04-02'
-=======
-  datestamp <- '2024-03-25'
->>>>>>> 2c44ba62adb18b720a513e0bbbd0cbf454a0a9ca
+# datestamp <- '2024-04-02'
+datestamp <- '2024-04-17'
 
 set.seed(12345)
 
@@ -1354,23 +1351,12 @@ control <- function(N=10000,
   #                                       clinical_sensitivity=c(early=0.3, late=0.8),
   #                                       ext=ext,
   #                                       saveit=saveit)
-  <<<<<<< HEAD
-  
   # visualize conceptual model of sensitivity
   plot_test_sensitivity_examples(ext=ext, saveit=saveit)
-  
+
   # visualize how test sensitivity depends on age and clinical stage
   plot_test_sensitivity_age_stage_experiment_table(ext=ext, saveit=saveit)
-  
-  =======
-    
-    # visualize conceptual model of sensitivity
-    plot_test_sensitivity_examples(ext=ext, saveit=saveit)
-  
-  # visualize how test sensitivity depends on age and clinical stage
-  plot_test_sensitivity_age_stage_experiment_table(ext=ext, saveit=saveit)
-  
-  >>>>>>> 2c44ba62adb18b720a513e0bbbd0cbf454a0a9ca
+
   # simulate natural histories
   dset <- expand_grid(test_age, mean_sojourn_time, indolent_rate)
   dset <- dset %>% group_by(test_age, mean_sojourn_time, indolent_rate)
