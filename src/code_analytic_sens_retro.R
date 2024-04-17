@@ -18,10 +18,6 @@ g <- function(s, mean_sojourn_time){
   1/mean_sojourn_time*exp(-1/mean_sojourn_time*s)
 }
 
-G <- function(t, u, t0, mean_sojourn_time){
-  tp <- t0+u # preclinical onset time
-  1-exp(-(1/mean_sojourn_time)*(t-tp))
-}
 
 # sensitivity function
 h <- function(t, s, u, t0, onset_sensitivity, clinical_sensitivity){

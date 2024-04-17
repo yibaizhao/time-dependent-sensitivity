@@ -1,4 +1,10 @@
 library(here)
+library(ggplot2)
+library(stringr)
+library(tidyr)
+
+# datastamp <- "2024-04-15"
+datastamp <- "2024-04-17"
 
 ##################################################
 # True sensitivity evaluated at specified times
@@ -36,26 +42,29 @@ out_sens_all <- function(preonset_rate,
                          mean_sojourn_time,
                          start_age,
                          test_age,
-                         follow_up_age,
+                         follow_up_year,
                          onset_sensitivity,
                          clinical_sensitivity,
-                         specificity){
+                         specificity,
+                         saveit){
   
   dset <- expand_grid(test_age,
                      preonset_rate, 
-                     mean_sojourn_time,
+                     MST = mean_sojourn_time,
                      start_age,
-                     follow_up_age,
+                     follow_up_year,
                      onset_sensitivity,
                      clinical_sensitivity,
-                     specificity)
+                     Specificity = specificity)
+  dset$follow_up_age <- dset$test_age+dset$follow_up_year
+
   source(here("src", "code_analytic_sens_prosp.R"))
   dset <- dset %>% 
     rowwise() %>%
     mutate(preclinical_sens = prospective_sens_analyt(start_age = start_age,
                                                      test_age = test_age,
                                                      preonset_rate = preonset_rate,
-                                                     mean_sojourn_time = mean_sojourn_time,
+                                                     mean_sojourn_time = MST,
                                                      onset_sensitivity = onset_sensitivity,
                                                      clinical_sensitivity = clinical_sensitivity,
                                                      indolent_rate = 0,
@@ -73,31 +82,55 @@ out_sens_all <- function(preonset_rate,
                                                      preonset_rate = preonset_rate,
                                                      onset_sensitivity = onset_sensitivity,
                                                      clinical_sensitivity = clinical_sensitivity,
-                                                     mean_sojourn_time = mean_sojourn_time, 
-                                                     specificity = specificity)) %>%
+                                                     mean_sojourn_time = MST, 
+                                                     specificity = Specificity)) %>%
     ungroup()
   
-  View(dset)
-  
-  dset <- dset %>% pivot_longer(cols = c(preclinical_sens, retros_sens),
-                        names_to = "type",
-                        values_to = "sensitivity")
+  dset2 <- dset %>% pivot_longer(cols = c(preclinical_sens, retros_sens),
+                        names_to = "Type",
+                        values_to = "Sensitivity")
+  dset2 <- dset2 %>% mutate(Type = ifelse(Type == "preclinical_sens", "Pre-clinical", "Retrospective"))
   # figure
-  ggplot(dset, aes(x = follow_up_age, y = sensitivity, color = type)) +
-    geom_line() +
-    facet_grid(mean_sojourn_time~specificity, labeller = label_both) +
+  gg <- ggplot(dset2, aes(x = factor(follow_up_year), y = Sensitivity, fill = Type)) +
+    geom_bar(stat = "identity", position = "dodge", width = 0.6) +
+    facet_grid(MST ~ Specificity, 
+               labeller = label_both) +
     ylim(0, 1) +
-    labs(subtitle = paste0("Start age=", start_age, ", Onset rate=", preonset_rate, ", test age=", test_age))
+    theme(legend.position = "top") +
+    labs(subtitle = paste0("Start age=", start_age, ", onset rate=", preonset_rate, ", sample/screen age=", test_age),
+         x = " Years follow-up after blood sample")
+  print(gg)
+  
+  if(saveit){
+    filename <- str_glue("compare_preclinical_vs_retrospective_{datastamp}")
+    ggsave(plot=print(gg), here("figure", paste0("fig_", filename, ".png")), width=8, height=6)
+    write.csv(dset, here("tables", paste0("tbl_", filename, ".csv")))
+  }
 }
 
-out_sens_all(preonset_rate = 0.1,
-             mean_sojourn_time = c(5, 10, 20),
-             start_age = 40,
-             test_age = 50,
-             follow_up_age = seq(60, 100, 10),
-             onset_sensitivity = 0,
-             clinical_sensitivity = 0.8,
-             specificity = c(0.9, 1))
+
+control <- function(preonset_rate = 0.1,
+                    mean_sojourn_time = c(5, 10, 20),
+                    start_age = 40,
+                    test_age = 50,
+                    follow_up_year = c(5, 10, 20),
+                    onset_sensitivity = 0.3,
+                    clinical_sensitivity = 0.8,
+                    specificity = c(0.9, 1),
+                    saveit = FALSE){
+  
+  out_sens_all(preonset_rate,
+               mean_sojourn_time,
+               start_age,
+               test_age,
+               follow_up_year,
+               onset_sensitivity,
+               clinical_sensitivity,
+               specificity,
+               saveit)
+}
+
+control(saveit = TRUE)
 
 
 
