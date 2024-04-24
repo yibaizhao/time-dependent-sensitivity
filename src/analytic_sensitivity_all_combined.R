@@ -4,7 +4,8 @@ library(stringr)
 library(tidyr)
 
 # datastamp <- "2024-04-15"
-datastamp <- "2024-04-17"
+# datastamp <- "2024-04-17"
+datastamp <- "2024-04-24"
 
 ##################################################
 # True sensitivity evaluated at specified times
@@ -85,20 +86,33 @@ out_sens_all <- function(preonset_rate,
                                                      mean_sojourn_time = MST, 
                                                      specificity = Specificity)) %>%
     ungroup()
+  source(here("src", "code_analytic_sens_em.R"))
+  dset <- dset %>% 
+    rowwise() %>%
+    mutate(empirical_sens = analytic_empirical_sens(t = test_age, 
+                                                    t0 = start_age, 
+                                                    t_check = follow_up_age,
+                                                    preonset_rate = preonset_rate,
+                                                    onset_sensitivity = onset_sensitivity,
+                                                    clinical_sensitivity = clinical_sensitivity,
+                                                    mean_sojourn_time = MST)) %>%
+    ungroup()
   
-  dset2 <- dset %>% pivot_longer(cols = c(preclinical_sens, retros_sens),
+  dset2 <- dset %>% pivot_longer(cols = c(preclinical_sens, retros_sens, empirical_sens),
                         names_to = "Type",
                         values_to = "Sensitivity")
-  dset2 <- dset2 %>% mutate(Type = ifelse(Type == "preclinical_sens", "Pre-clinical", "Retrospective"))
+  dset2 <- dset2 %>% mutate(Type = ifelse(Type == "preclinical_sens", "Pre-clinical", 
+                                          ifelse(Type == "retros_sens", "Retrospective", "Empirical")),
+                            Type = factor(Type, levels = c("Pre-clinical", "Empirical", "Retrospective")))
   # figure
-  gg <- ggplot(dset2, aes(x = factor(follow_up_year), y = Sensitivity, fill = Type)) +
-    geom_bar(stat = "identity", position = "dodge", width = 0.6) +
+  gg <- ggplot(dset2, aes(x = follow_up_year, y = Sensitivity, color = Type)) +
+    geom_line() +
     facet_grid(MST ~ Specificity, 
                labeller = label_both) +
     ylim(0, 1) +
     theme(legend.position = "top") +
     labs(subtitle = paste0("Start age=", start_age, ", onset rate=", preonset_rate, ", sample/screen age=", test_age),
-         x = " Years follow-up after blood sample")
+         x = "Follow-up interval (years) after blood sampling")
   print(gg)
   
   if(saveit){
@@ -109,11 +123,11 @@ out_sens_all <- function(preonset_rate,
 }
 
 
-control <- function(preonset_rate = 0.1,
+control <- function(preonset_rate = 0.05,
                     mean_sojourn_time = c(5, 10, 20),
                     start_age = 40,
-                    test_age = 50,
-                    follow_up_year = c(5, 10, 20),
+                    test_age = 55,
+                    follow_up_year = seq(0, 20, 2),
                     onset_sensitivity = 0.3,
                     clinical_sensitivity = 0.8,
                     specificity = c(0.9, 1),
@@ -130,31 +144,6 @@ control <- function(preonset_rate = 0.1,
                saveit)
 }
 
-control(saveit = TRUE)
+control(saveit = FALSE)
 
-
-
-
-source(here("src", "code_analytic_sens_em.R"))
-rate.matrix <- matrix(c(-preonset_rate, preonset_rate, 0,
-                        0, -1/mean_sojourn_time, 1/mean_sojourn_time,
-                        0, 0, 0),
-                      byrow=T,nrow=3)
-sens_em <- sapply(test_age, function(t) {
-  empirical.sensitivity.simulation(seed=123, 
-                                   rate.matrix = rate.matrix,
-                                   start.dist = c(1,0,0),
-                                   start_age = start_age,
-                                   screen.times = t,
-                                   post.screen.lookout = screen_interval,
-                                   clinical.cancer.state = 3,
-                                   pre.clinical.cancer.state = 2,
-                                   onset_sensitivity = onset_sensitivity,
-                                   clinical_sensitivity = clinical_sensitivity,
-                                   multiple.tests = FALSE,
-                                   nreps = 10000)
-  })
-sens_em <- t(as.matrix(sens_em)) %>% as.data.frame() %>% unnest()
-sens_em$test_age <- test_age
-sens_em$type <- "Empirical"
 
