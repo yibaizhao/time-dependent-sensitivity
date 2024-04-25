@@ -5,7 +5,8 @@ library(tidyr)
 
 # datastamp <- "2024-04-15"
 # datastamp <- "2024-04-17"
-datastamp <- "2024-04-24"
+# datastamp <- "2024-04-24"
+datastamp <- "2024-04-25"
 
 ##################################################
 # True sensitivity evaluated at specified times
@@ -57,7 +58,7 @@ out_sens_all <- function(preonset_rate,
                      onset_sensitivity,
                      clinical_sensitivity,
                      Specificity = specificity)
-  dset$follow_up_age <- dset$test_age+dset$follow_up_year
+  dset <- dset %>% mutate(follow_up_age = test_age + follow_up_year)
 
   source(here("src", "code_analytic_sens_prosp.R"))
   dset <- dset %>% 
@@ -86,6 +87,24 @@ out_sens_all <- function(preonset_rate,
                                                      mean_sojourn_time = MST, 
                                                      specificity = Specificity)) %>%
     ungroup()
+  # source(here("src", "code_simulation_sens_retro.R"))
+  # dset <- dset %>% 
+  #   rowwise() %>%
+  #   mutate(retros_sens_sim = retros_sens_sim(seed = 123, 
+  #                                            nreps = 10000,
+  #                                            t_check = follow_up_age,
+  #                                            start_age = start_age,
+  #                                            test_age = test_age,
+  #                                            preonset_rate = preonset_rate,
+  #                                            mean_sojourn_time = MST,
+  #                                            start.dist = c(1, 0, 0),
+  #                                            onset_sensitivity = onset_sensitivity,
+  #                                            clinical_sensitivity = clinical_sensitivity,
+  #                                            specificity = Specificity,
+  #                                            pre.clinical.cancer.state = 2,
+  #                                            clinical.cancer.state = 3)) %>%
+  #   ungroup()
+  
   source(here("src", "code_analytic_sens_em.R"))
   dset <- dset %>% 
     rowwise() %>%
@@ -128,7 +147,7 @@ control <- function(preonset_rate = 0.05,
                     start_age = 40,
                     test_age = 55,
                     follow_up_year = seq(0, 20, 2),
-                    onset_sensitivity = 0.3,
+                    onset_sensitivity = 0,
                     clinical_sensitivity = 0.8,
                     specificity = c(0.9, 1),
                     saveit = FALSE){
@@ -144,6 +163,6 @@ control <- function(preonset_rate = 0.05,
                saveit)
 }
 
-control(saveit = FALSE)
+control(saveit = TRUE)
 
 

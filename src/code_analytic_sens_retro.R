@@ -56,12 +56,12 @@ f_integral_g <- function(u, t, t0, t_check,
   if(is_TRUE_positive){
     f(u, preonset_rate)*
       integrate(Vectorize(g),
-                lower = t-u, upper = t_check-u,
+                lower = t-tp, upper = t_check-tp,
                 mean_sojourn_time = mean_sojourn_time)$value
   }else{
     f(u, preonset_rate)*
       integrate(Vectorize(g),
-                lower = 0, upper = t_check-u,
+                lower = 0, upper = t_check-tp,
                 mean_sojourn_time = mean_sojourn_time)$value
   }
 }
