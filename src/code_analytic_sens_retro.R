@@ -10,8 +10,13 @@ library(tidyverse)
 ## f(u): onset time ~ exp(rate)
 ## g(s): sojourn time ~ exp(1/mst), mst=mean sojourn time
 ##################################################
-f <- function(u, preonset_rate){
-  preonset_rate*exp(-preonset_rate*u)
+f <- function(u, preonset_rate=NULL, dist="exponential", interval=NA){
+  if(dist=="exponential"){
+    return(preonset_rate*exp(-preonset_rate*u))
+  }
+  if(dist=="uniform"){
+    return(1/(interval[2]-interval[1]))
+  }
 }
 
 g <- function(s, mean_sojourn_time){
@@ -36,9 +41,10 @@ h_g <- function(s, t, u, t0, onset_sensitivity, clinical_sensitivity, mean_sojou
   return(h(t, s, u, t0, onset_sensitivity, clinical_sensitivity)*g(s, mean_sojourn_time))
 }
 
-f_integral_h_g <- function(u, t, t0, t_check, preonset_rate, onset_sensitivity, clinical_sensitivity, mean_sojourn_time){
+f_integral_h_g <- function(u, t, t0, t_check, preonset_rate, onset_sensitivity, clinical_sensitivity, mean_sojourn_time, 
+                           dist, interval){
   tp <- t0+u # preclinical onset time
-  f(u, preonset_rate)*
+  f(u, preonset_rate, dist, interval)*
     integrate(Vectorize(h_g),
               lower=t-tp, upper=t_check-tp,
               u=u,
@@ -50,23 +56,25 @@ f_integral_h_g <- function(u, t, t0, t_check, preonset_rate, onset_sensitivity, 
 }
 
 f_integral_g <- function(u, t, t0, t_check,
-                       preonset_rate, mean_sojourn_time,
+                       preonset_rate, mean_sojourn_time, 
+                       dist, interval,
                        is_TRUE_positive = TRUE){
   tp <- t0+u
   if(is_TRUE_positive){
-    f(u, preonset_rate)*
+    f(u, preonset_rate, dist, interval)*
       integrate(Vectorize(g),
                 lower = t-tp, upper = t_check-tp,
                 mean_sojourn_time = mean_sojourn_time)$value
   }else{
-    f(u, preonset_rate)*
+    f(u, preonset_rate, dist, interval)*
       integrate(Vectorize(g),
                 lower = 0, upper = t_check-tp,
                 mean_sojourn_time = mean_sojourn_time)$value
   }
 }
 
-integral_f_h_g <- function(t, t0, t_check, preonset_rate, onset_sensitivity, clinical_sensitivity, mean_sojourn_time){
+integral_f_h_g <- function(t, t0, t_check, preonset_rate, onset_sensitivity, clinical_sensitivity, mean_sojourn_time,
+                           dist, interval){
   integrate(Vectorize(f_integral_h_g),
             lower = 0, upper = t-t0,
             t = t,
@@ -75,11 +83,14 @@ integral_f_h_g <- function(t, t0, t_check, preonset_rate, onset_sensitivity, cli
             preonset_rate = preonset_rate, 
             onset_sensitivity = onset_sensitivity, 
             clinical_sensitivity = clinical_sensitivity,
-            mean_sojourn_time = mean_sojourn_time)$value
+            mean_sojourn_time = mean_sojourn_time,
+            dist = dist, 
+            interval = interval)$value
 }
 
 integral_f_g <- function(t, t0, t_check,
                          preonset_rate, mean_sojourn_time,
+                         dist, interval,
                          is_TRUE_positive = TRUE){
   if(is_TRUE_positive){
     integrate(Vectorize(f_integral_g),
@@ -89,6 +100,8 @@ integral_f_g <- function(t, t0, t_check,
               t_check = t_check, 
               preonset_rate = preonset_rate, 
               mean_sojourn_time = mean_sojourn_time,
+              dist = dist, 
+              interval = interval,
               is_TRUE_positive = TRUE)$value
   }else{
     integrate(Vectorize(f_integral_g),
@@ -98,6 +111,8 @@ integral_f_g <- function(t, t0, t_check,
               t_check = t_check, 
               preonset_rate = preonset_rate, 
               mean_sojourn_time = mean_sojourn_time,
+              dist = dist, 
+              interval = interval,
               is_TRUE_positive = FALSE)$value
     
   }
@@ -108,24 +123,29 @@ analytic_retrospective_sens <- function(t, t0, t_check,
                                         preonset_rate,
                                         onset_sensitivity,
                                         clinical_sensitivity,
-                                        mean_sojourn_time, 
+                                        mean_sojourn_time,
+                                        dist, interval,
                                         specificity = 1){
   
   numerator_TRUE_positive <- integral_f_h_g(t, t0, t_check,
                                           preonset_rate, 
                                           onset_sensitivity, 
                                           clinical_sensitivity,
-                                          mean_sojourn_time)
+                                          mean_sojourn_time,
+                                          dist, interval)
   numerator_FALSE_positive <- (1 - specificity) *
     integral_f_g(t, t0, t_check,
                  preonset_rate, mean_sojourn_time,
+                 dist, interval,
                  is_TRUE_positive = FALSE)
   
   denominator_TRUE_positive <- integral_f_g(t, t0, t_check,
                                             preonset_rate, mean_sojourn_time,
+                                            dist, interval,
                                             is_TRUE_positive = TRUE)
   denominator_FALSE_positive <- integral_f_g(t, t0, t_check,
                                             preonset_rate, mean_sojourn_time,
+                                            dist, interval,
                                             is_TRUE_positive = FALSE)
   
   return((numerator_TRUE_positive + numerator_FALSE_positive) / (denominator_TRUE_positive + denominator_FALSE_positive))

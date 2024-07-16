@@ -54,8 +54,13 @@ library(tidyverse)
 ##            mean_sojourn_time: mean sojourn time
 ##################################################
 
-f <- function(u, preonset_rate){
-  preonset_rate*exp(-preonset_rate*u)
+f <- function(u, preonset_rate=NULL, dist="exponential", interval=NA){
+  if(dist=="exponential"){
+    return(preonset_rate*exp(-preonset_rate*u))
+  }
+  if(dist=="uniform"){
+    return(1/(interval[2]-interval[1]))
+  }
 }
 
 g <- function(s, mean_sojourn_time){
@@ -81,25 +86,22 @@ h <- function(t, s, u, t0, onset_sensitivity, clinical_sensitivity){
   return(c(sensitivity_progressive, sensitivity_indolent))
 }
 
-f_h <- function(u, s, t0, t, preonset_rate, onset_sensitivity, clinical_sensitivity){
-  f(u, preonset_rate)*h(t, s, u, t0, onset_sensitivity, clinical_sensitivity)[2]
-}
-
-h_g <- function(s, t, u, t0, onset_sensitivity, clinical_sensitivity, mean_sojourn_time, indolent=FALSE){
+h_g <- function(s, t, u, t0, onset_sensitivity, clinical_sensitivity, mean_sojourn_time, indolent){
   if(indolent){
     return(h(t, s, u, t0, onset_sensitivity, clinical_sensitivity)[2]*g(s, mean_sojourn_time))
   }
   return(h(t, s, u, t0, onset_sensitivity, clinical_sensitivity)[1]*g(s, mean_sojourn_time))
 }
 
-f_G <- function(u, t, t0, preonset_rate, mean_sojourn_time){
-  f(u, preonset_rate)*(1-G(t, u, t0, mean_sojourn_time))
+f_G <- function(u, t, t0, preonset_rate, mean_sojourn_time, dist, interval){
+  f(u, preonset_rate, dist, interval)*(1-G(t, u, t0, mean_sojourn_time))
 }
 
-integral_h_g <- function(u, t, t0, preonset_rate, onset_sensitivity, clinical_sensitivity, mean_sojourn_time, indolent){
+integral_h_g <- function(u, t, t0, preonset_rate, onset_sensitivity, clinical_sensitivity, 
+                         mean_sojourn_time, dist, interval, indolent){
   tp <- t0+u # preclinical onset time
   if(indolent){
-    f(u, preonset_rate)*
+    f(u, preonset_rate, dist, interval)*
       integrate(Vectorize(h_g),
                 lower=0, upper=Inf,
                 t=t,
@@ -110,7 +112,7 @@ integral_h_g <- function(u, t, t0, preonset_rate, onset_sensitivity, clinical_se
                 mean_sojourn_time=mean_sojourn_time,
                 indolent=indolent)$value
   }else{
-    f(u, preonset_rate)*
+    f(u, preonset_rate, dist, interval)*
       integrate(Vectorize(h_g),
                 lower=t-tp, upper=Inf,
                 t=t,
@@ -128,6 +130,8 @@ prospective_sens_num <- function(t, t0,
                                  onset_sensitivity,
                                  clinical_sensitivity,
                                  mean_sojourn_time,
+                                 dist,
+                                 interval,
                                  indolent_rate){
   prospective_sens_num_integral_progressive <- (1-indolent_rate) *
     integrate(Vectorize(integral_h_g),
@@ -138,7 +142,9 @@ prospective_sens_num <- function(t, t0,
               onset_sensitivity=onset_sensitivity,
               clinical_sensitivity=clinical_sensitivity,
               mean_sojourn_time=mean_sojourn_time,
-              indolent=FALSE)$value
+              dist = dist, 
+              interval = interval,
+              indolent=(indolent_rate>0))$value
   prospective_sens_num_integral_indolent <- indolent_rate *
     integrate(Vectorize(integral_h_g),
               lower=0, upper=t-t0,
@@ -148,23 +154,29 @@ prospective_sens_num <- function(t, t0,
               onset_sensitivity=onset_sensitivity,
               clinical_sensitivity=clinical_sensitivity,
               mean_sojourn_time=mean_sojourn_time,
-              indolent=TRUE)$value
+              dist = dist, 
+              interval = interval,
+              indolent=(indolent_rate>0))$value
   
   prospective_sens_num_integral_progressive+prospective_sens_num_integral_indolent
 }
 
-prospective_sens_denom <- function(t, t0, preonset_rate, mean_sojourn_time, indolent_rate){
+prospective_sens_denom <- function(t, t0, preonset_rate, mean_sojourn_time, dist, interval, indolent_rate){
   prospective_sens_denom_integral_progressive <- (1-indolent_rate)*
     integrate(Vectorize(f_G),
               lower=0, upper=t-t0,
               t=t, 
               t0=t0,
               preonset_rate=preonset_rate, 
-              mean_sojourn_time=mean_sojourn_time)$value
+              mean_sojourn_time=mean_sojourn_time,
+              dist = dist, 
+              interval = interval)$value
   prospective_sens_denom_integral_indolent <- indolent_rate*
     integrate(Vectorize(f),
               lower=0, upper=t-t0,
-              preonset_rate=preonset_rate)$value
+              preonset_rate=preonset_rate,
+              dist = dist, 
+              interval = interval)$value
   
   prospective_sens_denom_integral_progressive+prospective_sens_denom_integral_indolent
 }
@@ -176,6 +188,8 @@ prospective_sens_analyt <- function(start_age,
                                     mean_sojourn_time,
                                     onset_sensitivity,
                                     clinical_sensitivity,
+                                    dist,
+                                    interval,
                                     indolent_rate,
                                     confirmation_test_rate=1,
                                     confirmation_test_sensitivity=1){
@@ -186,12 +200,16 @@ prospective_sens_analyt <- function(start_age,
                                     onset_sensitivity=onset_sensitivity, 
                                     clinical_sensitivity=clinical_sensitivity, 
                                     mean_sojourn_time=mean_sojourn_time,
+                                    dist = dist,
+                                    interval = interval,
                                     indolent_rate=indolent_rate)
   
   denomerator <- prospective_sens_denom(t=test_age, 
                                         t0=start_age, 
                                         preonset_rate=preonset_rate, 
-                                        mean_sojourn_time=mean_sojourn_time, 
+                                        mean_sojourn_time=mean_sojourn_time,
+                                        dist = dist, 
+                                        interval = interval, 
                                         indolent_rate=indolent_rate)    
   
   return(confirmation_test_rate*confirmation_test_sensitivity*numerator/denomerator)
