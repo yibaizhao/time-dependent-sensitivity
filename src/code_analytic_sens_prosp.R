@@ -214,3 +214,30 @@ prospective_sens_analyt <- function(start_age,
   
   return(confirmation_test_rate*confirmation_test_sensitivity*numerator/denomerator)
 }
+
+prospective_sens_all_test_age_analyt <- function(test_age_range,
+                                                 start_age,
+                                                preonset_rate,
+                                                mean_sojourn_time,
+                                                onset_sensitivity,
+                                                clinical_sensitivity,
+                                                dist,
+                                                interval,
+                                                indolent_rate,
+                                                confirmation_test_rate=1,
+                                                confirmation_test_sensitivity=1){
+  overall_sensitivity <- integrate(Vectorize(prospective_sens_analyt),
+            lower=test_age_range[1], upper=test_age_range[2],
+            start_age = start_age,
+            preonset_rate = preonset_rate,
+            mean_sojourn_time = mean_sojourn_time,
+            onset_sensitivity = onset_sensitivity,
+            clinical_sensitivity = clinical_sensitivity,
+            dist = dist,
+            interval = interval,
+            indolent_rate = indolent_rate,
+            confirmation_test_rate=1,
+            confirmation_test_sensitivity=1)$value
+  
+  return(overall_sensitivity / (test_age_range[2] - test_age_range[1]))
+}

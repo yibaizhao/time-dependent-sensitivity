@@ -119,14 +119,14 @@ integral_f_g <- function(t, t0, t_check,
 }
 
 
-analytic_retrospective_sens <- function(t, t0, t_check,
+analytic_retrospective_sens <- function(t, t0, follow_up_year,
                                         preonset_rate,
                                         onset_sensitivity,
                                         clinical_sensitivity,
                                         mean_sojourn_time,
                                         dist, interval,
                                         specificity = 1){
-  
+  t_check <- t + follow_up_year
   numerator_TRUE_positive <- integral_f_h_g(t, t0, t_check,
                                           preonset_rate, 
                                           onset_sensitivity, 
@@ -149,5 +149,29 @@ analytic_retrospective_sens <- function(t, t0, t_check,
                                             is_TRUE_positive = FALSE)
   
   return((numerator_TRUE_positive + numerator_FALSE_positive) / (denominator_TRUE_positive + denominator_FALSE_positive))
+}
+
+analytic_retrospective_sens_all_test_age <- function(test_age_range,
+                                                     t0, follow_up_year,
+                                                     preonset_rate,
+                                                     onset_sensitivity,
+                                                     clinical_sensitivity,
+                                                     mean_sojourn_time,
+                                                     dist, interval,
+                                                     specificity = 1){
+  
+  overall_sensitivity <- integrate(Vectorize(analytic_retrospective_sens),
+                                   lower=test_age_range[1], upper=test_age_range[2],
+                                   t0 = t0, 
+                                   follow_up_year = follow_up_year,
+                                   preonset_rate = preonset_rate,
+                                   onset_sensitivity = onset_sensitivity,
+                                   clinical_sensitivity = clinical_sensitivity,
+                                   mean_sojourn_time = mean_sojourn_time,
+                                   dist = dist, 
+                                   interval = interval,
+                                   specificity = specificity)$value
+  
+  return(overall_sensitivity / (test_age_range[2] - test_age_range[1]))
 }
 

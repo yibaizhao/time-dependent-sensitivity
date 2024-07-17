@@ -125,13 +125,14 @@ new_case <- function(t, t0, t_check,
             interval = interval)$value
 }
 
-analytic_empirical_sens <- function(t, t0, t_check,
+analytic_empirical_sens <- function(t, t0, follow_up_year,
                                     preonset_rate,
                                     onset_sensitivity,
                                     clinical_sensitivity,
                                     mean_sojourn_time,
                                     dist, 
                                     interval){
+  t_check <- t + follow_up_year
   screen_detected <- screen_detected(t, t0, 
                                preonset_rate,
                                onset_sensitivity,
@@ -151,4 +152,27 @@ analytic_empirical_sens <- function(t, t0, t_check,
                                        dist, interval)
   
   return(screen_detected / (screen_detected + interval_cancer_false_negative + interval_cancer_new_case))
+}
+
+analytic_empirical_sens_all_test_age <- function(test_age_range,
+                                                 t0, follow_up_year,
+                                                  preonset_rate,
+                                                  onset_sensitivity,
+                                                  clinical_sensitivity,
+                                                  mean_sojourn_time,
+                                                  dist, 
+                                                  interval){
+  overall_sensitivity <- integrate(Vectorize(analytic_empirical_sens),
+                                   lower=test_age_range[1], upper=test_age_range[2],
+                                   t0 = t0, 
+                                   follow_up_year = follow_up_year,
+                                   preonset_rate = preonset_rate,
+                                   onset_sensitivity = onset_sensitivity,
+                                   clinical_sensitivity = clinical_sensitivity,
+                                   mean_sojourn_time = mean_sojourn_time,
+                                   dist = dist, 
+                                   interval = interval)$value
+  
+  return(overall_sensitivity / (test_age_range[2] - test_age_range[1]))
+  
 }
