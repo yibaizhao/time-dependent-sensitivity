@@ -227,6 +227,7 @@ out_sens_all <- function(preonset_rate,
 }
 
 output_figures <- function(dset){
+  dset <- dset %>% filter(clinical_sensitivity == 0.8)
   
   theme_set(theme_classic())
   theme_update(axis.ticks.length=unit(0.2, 'cm'))
@@ -235,35 +236,44 @@ output_figures <- function(dset){
   dset_preclinical <- dset %>%
     select(-c(row_id, follow_up_year, interval, Specificity)) %>%
     filter(Type %in% c("Preclinical")) %>%
-    unique()
+    unique() %>%
+    mutate(degradation = clinical_sensitivity - Sensitivity)
   # Define colors for each level of mean_sojourn_time
   colors <- c("1" = "grey10", "2" = "grey30", "3" = "grey50", "5" = "grey70", "10" = "grey90")
   
   gg1 <- dset_preclinical %>%
     ggplot(aes(x = factor(MST), y = Sensitivity, fill = factor(MST))) +
     geom_hline(aes(yintercept = clinical_sensitivity), linetype = 'dashed') +
-    geom_bar(stat = "identity",
-             width=1/2,
-             position=position_dodge(width=0.4)) +
+    geom_bar(stat = "identity", width = 1/2, position = position_dodge(width = 0.4)) +
+    geom_linerange(aes(ymin = Sensitivity, ymax = clinical_sensitivity, color = factor(MST)),
+                   alpha = 0.3, position = position_dodge2(width = 1)) +
+    geom_text(aes(label = sprintf('-%2.0f%%', 100 * degradation), 
+                  y = Sensitivity + degradation / 2, color = factor(MST)),
+              size = 3, position = position_dodge2(width = 1), show.legend = FALSE) +
     scale_fill_manual(values = colors) +
-    facet_grid(.~clinical_sensitivity, labeller = label_both) +
+    scale_color_manual(values = colors) +
+    # facet_grid(. ~ clinical_sensitivity, labeller = label_both) +
     labs(
-      title = "Sensitivity over Mean Sojourn Time",
-      subtitle = paste0("Start age=", start_age, ", onset rate=", preonset_rate, ", screen within the age range of ", test_age_range[1], " to ", test_age_range[2]),
+      # title = "Sensitivity over Mean Sojourn Time",
+      # subtitle = paste0("Start age=", start_age, ", onset rate=", preonset_rate, 
+      #                   ", screen within the age range of ", test_age_range[1], " to ", test_age_range[2]),
       y = "Mean preclinical sensitivity",
-      x = "Mean sojourn time") +
-    scale_y_continuous(limits=c(0, 1),
-                       breaks=seq(0, 1, by=0.2),
-                       labels=label_percent(accuracy=1),
-                       expand=c(0, 0)) +
-    theme(legend.position = "none") 
+      x = "Mean sojourn time"
+    ) +
+    scale_y_continuous(
+      limits = c(0, 1),
+      breaks = seq(0, 1, by = 0.2),
+      labels = label_percent(accuracy = 1),
+      expand = c(0, 0)
+    ) +
+    theme(legend.position = "none")  
   print(gg1)
     
   dset_preclinical_retrospective <- dset %>%
     select(-c(row_id, interval)) %>%
     filter(Type %in% c("Preclinical", "Retrospective"),
            MST %in% c(2, 5, 10),
-           clinical_sensitivity == 0.95) %>%
+           follow_up_year <= 10) %>%
     unique()
   gg2 <- dset_preclinical_retrospective %>%
     ggplot(aes(x = follow_up_year, y = Sensitivity, color = Type, linetype = factor(Specificity))) +
@@ -273,12 +283,12 @@ output_figures <- function(dset){
                        breaks=seq(0, 1, by=0.2),
                        labels=label_percent(accuracy=1),
                        expand=c(0, 0)) +
-    scale_x_continuous(limits = c(2, 20), breaks = seq(2, 20, by = 2)) +
+    scale_x_continuous(limits = c(2, 10), breaks = seq(2, 10, by = 2)) +
     # scale_color_brewer(palette = "Set1") +
     labs(
-      title = "Sensitivity Over Follow-up Years",
-      subtitle = paste0("Start age=", start_age, ", onset rate=", preonset_rate,
-                        ", clinical sensitivity=0.95"),
+      # title = "Sensitivity Over Follow-up Years",
+      # subtitle = paste0("Start age=", start_age, ", onset rate=", preonset_rate,
+      #                   ", clinical sensitivity=", unique(dset_preclinical_retrospective$clinical_sensitivity)),
       x = "Follow-up interval (years) after blood sampling",
       y = "Sensitivity",
       color = "Type",
@@ -315,7 +325,7 @@ output_figures <- function(dset){
     ggplot(aes(x = MST, y = Sensitivity, color = Type, shape = Type, linetype = factor(follow_up_year))) +
     geom_line(size = 1) +
     geom_point(size = 2) +
-    geom_point(data = dset_empirical_Jane, aes(x = MST, y = Sensitivity, color = Type, shape = Type), color = "yellow") +
+    # geom_point(data = dset_empirical_Jane, aes(x = MST, y = Sensitivity, color = Type, shape = Type), color = "yellow") +
     # facet_grid(.~ follow_up_year, labeller = label_both) +
     scale_y_continuous(limits=c(0, 1),
                        breaks=seq(0, 1, by=0.2),
@@ -323,9 +333,9 @@ output_figures <- function(dset){
                        expand=c(0, 0)) +
     scale_x_continuous(breaks = unique(dset_preclinial_empirical$MST)) +
     labs(
-      title = "Sensitivity over Mean Sojourn Time",
-      subtitle = paste0("Start age=", start_age, ", onset rate=", preonset_rate,
-                        ", clinical sensitivity=", unique(dset_preclinical_empirical$clinical_sensitivity)),
+      # title = "Sensitivity over Mean Sojourn Time",
+      # subtitle = paste0("Start age=", start_age, ", onset rate=", preonset_rate,
+      #                   ", clinical sensitivity=", unique(dset_preclinical_empirical$clinical_sensitivity)),
       x = "Mean Sojourn Time",
       y = "Sensitivity",
       color = "Type",
@@ -349,11 +359,11 @@ output_figures <- function(dset){
   
   if(saveit){
     filename1 <- str_glue("compare_preclinical_across_MST_{datastamp}")
-    ggsave(plot=print(gg1), here("figure", paste0("fig_", filename1, ".png")), width=8, height=6)
+    ggsave(plot=print(gg1), here("figure", paste0("fig_", filename1, ".png")), width=6, height=6)
     filename2 <- str_glue("compare_preclinical_vs_retrospective_{datastamp}")
-    ggsave(plot=print(gg2), here("figure", paste0("fig_", filename2, ".png")), width=8, height=6)
+    ggsave(plot=print(gg2), here("figure", paste0("fig_", filename2, ".png")), width=6, height=6)
     filename3 <- str_glue("compare_preclinical_vs_empirical_{datastamp}")
-    ggsave(plot=print(gg3), here("figure", paste0("fig_", filename3, ".png")), width=8, height=6)
+    ggsave(plot=print(gg3), here("figure", paste0("fig_", filename3, ".png")), width=6, height=6)
   }
   }
 
