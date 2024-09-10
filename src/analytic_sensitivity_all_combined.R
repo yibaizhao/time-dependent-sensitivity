@@ -7,6 +7,7 @@ library(scales)
 library(foreach)
 library(doParallel)
 library(magrittr)
+library(readr)
 
 # datastamp <- "2024-04-15"
 # datastamp <- "2024-04-17"
@@ -17,7 +18,10 @@ library(magrittr)
 # datastamp <- "2024-05-01"
 # datastamp <- "2024-07-15"
 # datastamp <- "2024-07-16"
-datastamp <- "2024-07-17"
+# datastamp <- "2024-07-17"
+# datastamp <- "2024-07-29"
+# datastamp <- "2024-08-13"
+datastamp <- "2024-09-10"
 
 ##################################################
 # True sensitivity evaluated at specified times
@@ -118,6 +122,7 @@ summary_table <- function(mean_onset_time,
 
 out_sens_all <- function(preonset_rate,
                          mean_sojourn_time,
+                         shift,
                          start_age,
                          test_age_range, # 50-74
                          follow_up_year,
@@ -155,6 +160,7 @@ out_sens_all <- function(preonset_rate,
         preclinical_sens = prospective_sens_all_test_age_analyt(
           test_age_range = c(test_age_range_lb, test_age_range_ub),
           start_age = start_age,
+          shift = shift,
           preonset_rate = preonset_rate,
           mean_sojourn_time = MST,
           onset_sensitivity = onset_sensitivity,
@@ -172,6 +178,7 @@ out_sens_all <- function(preonset_rate,
         retros_sens = analytic_retrospective_sens_all_test_age(
           test_age_range = c(test_age_range_lb, test_age_range_ub),
           t0 = start_age, 
+          shift = shift, 
           follow_up_year = follow_up_year,
           preonset_rate = preonset_rate,
           onset_sensitivity = onset_sensitivity,
@@ -188,6 +195,7 @@ out_sens_all <- function(preonset_rate,
         empirical_sens = analytic_empirical_sens_all_test_age(
           test_age_range = c(test_age_range_lb, test_age_range_ub),
           t0 = start_age, 
+          shift = shift, 
           follow_up_year = follow_up_year,
           preonset_rate = preonset_rate,
           onset_sensitivity = onset_sensitivity,
@@ -237,9 +245,11 @@ output_figures <- function(dset){
     select(-c(row_id, follow_up_year, interval, Specificity)) %>%
     filter(Type %in% c("Preclinical")) %>%
     unique() %>%
-    mutate(degradation = clinical_sensitivity - Sensitivity)
+    mutate(degradation = clinical_sensitivity - Sensitivity,
+           Sensitivity = percent(Sensitivity),
+           degradation = percent(degradation))
   # Define colors for each level of mean_sojourn_time
-  colors <- c("1" = "grey10", "2" = "grey30", "3" = "grey50", "5" = "grey70", "10" = "grey90")
+  colors <- c("1" = "grey10", "2" = "grey30", "4" = "grey50", "6" = "grey70")
   
   gg1 <- dset_preclinical %>%
     ggplot(aes(x = factor(MST), y = Sensitivity, fill = factor(MST))) +
@@ -254,9 +264,6 @@ output_figures <- function(dset){
     scale_color_manual(values = colors) +
     # facet_grid(. ~ clinical_sensitivity, labeller = label_both) +
     labs(
-      # title = "Sensitivity over Mean Sojourn Time",
-      # subtitle = paste0("Start age=", start_age, ", onset rate=", preonset_rate, 
-      #                   ", screen within the age range of ", test_age_range[1], " to ", test_age_range[2]),
       y = "Mean preclinical sensitivity",
       x = "Mean sojourn time"
     ) +
@@ -272,8 +279,9 @@ output_figures <- function(dset){
   dset_preclinical_retrospective <- dset %>%
     select(-c(row_id, interval)) %>%
     filter(Type %in% c("Preclinical", "Retrospective"),
-           MST %in% c(2, 5, 10),
+           # MST %in% c(2, 5, 10),
            follow_up_year <= 10) %>%
+    mutate(Type = factor(Type, levels = c("Preclinical", "Retrospective"))) %>%
     unique()
   gg2 <- dset_preclinical_retrospective %>%
     ggplot(aes(x = follow_up_year, y = Sensitivity, color = Type, linetype = factor(Specificity))) +
@@ -283,7 +291,7 @@ output_figures <- function(dset){
                        breaks=seq(0, 1, by=0.2),
                        labels=label_percent(accuracy=1),
                        expand=c(0, 0)) +
-    scale_x_continuous(limits = c(2, 10), breaks = seq(2, 10, by = 2)) +
+    scale_x_continuous(limits = c(1, 10), breaks = seq(1, 10, by = 1)) +
     # scale_color_brewer(palette = "Set1") +
     labs(
       # title = "Sensitivity Over Follow-up Years",
@@ -318,8 +326,10 @@ output_figures <- function(dset){
     select(-c(row_id, interval, Specificity)) %>%
     filter(Type %in% c("Preclinical", "Empirical"),
            follow_up_year %in% c(1, 2),
-           clinical_sensitivity == 0.8,
-           MST %in% c(1, 2, 3, 5)) %>%
+           clinical_sensitivity == 0.8
+           # MST %in% c(1, 2, 3, 5)
+           ) %>%
+    mutate(Type = factor(Type, levels = c("Preclinical", "Empirical"))) %>%
     unique()
   gg3 <- dset_preclinical_empirical %>%
     ggplot(aes(x = MST, y = Sensitivity, color = Type, shape = Type, linetype = factor(follow_up_year))) +
@@ -331,7 +341,7 @@ output_figures <- function(dset){
                        breaks=seq(0, 1, by=0.2),
                        labels=label_percent(accuracy=1),
                        expand=c(0, 0)) +
-    scale_x_continuous(breaks = unique(dset_preclinial_empirical$MST)) +
+    scale_x_continuous(breaks = unique(dset_preclinical_empirical$MST)) +
     labs(
       # title = "Sensitivity over Mean Sojourn Time",
       # subtitle = paste0("Start age=", start_age, ", onset rate=", preonset_rate,
@@ -341,7 +351,12 @@ output_figures <- function(dset){
       color = "Type",
       linetype = "Followup Year"
     ) +
-    theme_classic(base_size = 12) +
+    theme_classic(base_size = 12)+
+    guides(
+      linetype = guide_legend(order = 2),
+      color = guide_legend(order = 1),
+      shape = guide_legend(order = 1)
+    ) +
     theme(
       strip.background = element_rect(color = NA, fill = NA),
       strip.text = element_text(size = 10, face = "bold"),
@@ -353,26 +368,27 @@ output_figures <- function(dset){
       legend.title = element_text(face = "bold"),
       plot.title = element_text(face = "bold", size = 14),
       plot.subtitle = element_text(size = 12)
-    )
+    ) 
   
   print(gg3)
   
   if(saveit){
     filename1 <- str_glue("compare_preclinical_across_MST_{datastamp}")
-    ggsave(plot=print(gg1), here("figure", paste0("fig_", filename1, ".png")), width=6, height=6)
+    ggsave(plot=print(gg1), here("figure", paste0("fig_", filename1, ".pdf")), width=6, height=6)
     filename2 <- str_glue("compare_preclinical_vs_retrospective_{datastamp}")
-    ggsave(plot=print(gg2), here("figure", paste0("fig_", filename2, ".png")), width=6, height=6)
+    ggsave(plot=print(gg2), here("figure", paste0("fig_", filename2, ".pdf")), width=8, height=5)
     filename3 <- str_glue("compare_preclinical_vs_empirical_{datastamp}")
-    ggsave(plot=print(gg3), here("figure", paste0("fig_", filename3, ".png")), width=6, height=6)
+    ggsave(plot=print(gg3), here("figure", paste0("fig_", filename3, ".pdf")), width=8, height=5)
   }
   }
 
 
 control <- function(preonset_rate = 1/25,
-                    mean_sojourn_time = c(1, 2, 3, 5, 10),
+                    mean_sojourn_time = c(1, 2, 4, 6),
                     start_age = 40,
                     test_age_range = c(50, 74),
-                    follow_up_year = c(1, 2, seq(4, 20, 2)),
+                    shift = 1,
+                    follow_up_year = c(1:10),
                     onset_sensitivity = 0,
                     clinical_sensitivity = c(0.8, 0.95),
                     dist = "exponential", 
@@ -380,18 +396,20 @@ control <- function(preonset_rate = 1/25,
                     specificity = c(0.9, 1),
                     saveit = TRUE){
   
-  # out_sens_all(preonset_rate,
-  #              mean_sojourn_time,
-  #              start_age,
-  #              test_age_range,
-  #              follow_up_year,
-  #              onset_sensitivity,
-  #              clinical_sensitivity,
-  #              dist, 
-  #              interval,
-  #              specificity,
-  #              saveit = saveit)
-  dset <- read_csv(here("tables", "tbl_all_sens_2024-07-17.csv"))[,-1]
+  out_sens_all(preonset_rate,
+               mean_sojourn_time,
+               start_age,
+               test_age_range,
+               shift,
+               follow_up_year,
+               onset_sensitivity,
+               clinical_sensitivity,
+               dist,
+               interval,
+               specificity,
+               saveit = saveit)
+  # dset <- read_csv(here("tables", "tbl_all_sens_2024-07-17.csv"))[,-1]
+  # dset <- read_csv(here("tables", "tbl_all_sens_2024-08-13.csv"))[,-1]
   # summary_table(mean_onset_time = 25, 
   #               mean_sojourn_time = c(1, 2, 3, 5, 10),
   #               threshold = 100,

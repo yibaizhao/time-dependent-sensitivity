@@ -64,7 +64,7 @@ f <- function(u, preonset_rate=NULL, dist="exponential", interval=NA){
 }
 
 g <- function(s, mean_sojourn_time){
-  1/mean_sojourn_time*exp(-1/mean_sojourn_time*s)
+  1/mean_sojourn_time*exp(-1/mean_sojourn_time*(s))
 }
 
 G <- function(t, u, t0, mean_sojourn_time){
@@ -97,13 +97,13 @@ f_G <- function(u, t, t0, preonset_rate, mean_sojourn_time, dist, interval){
   f(u, preonset_rate, dist, interval)*(1-G(t, u, t0, mean_sojourn_time))
 }
 
-integral_h_g <- function(u, t, t0, preonset_rate, onset_sensitivity, clinical_sensitivity, 
+integral_h_g <- function(u, t, t0, shift, preonset_rate, onset_sensitivity, clinical_sensitivity, 
                          mean_sojourn_time, dist, interval, indolent){
   tp <- t0+u # preclinical onset time
   if(indolent){
     f(u, preonset_rate, dist, interval)*
       integrate(Vectorize(h_g),
-                lower=0, upper=Inf,
+                lower=shift, upper=Inf,
                 t=t,
                 u=u,
                 t0=t0,
@@ -114,7 +114,7 @@ integral_h_g <- function(u, t, t0, preonset_rate, onset_sensitivity, clinical_se
   }else{
     f(u, preonset_rate, dist, interval)*
       integrate(Vectorize(h_g),
-                lower=t-tp, upper=Inf,
+                lower=max(t-tp, shift), upper=Inf,
                 t=t,
                 u=u,
                 t0=t0,
@@ -125,7 +125,7 @@ integral_h_g <- function(u, t, t0, preonset_rate, onset_sensitivity, clinical_se
   }
 }
 
-prospective_sens_num <- function(t, t0,
+prospective_sens_num <- function(t, t0, shift,
                                  preonset_rate,
                                  onset_sensitivity,
                                  clinical_sensitivity,
@@ -138,6 +138,7 @@ prospective_sens_num <- function(t, t0,
               lower=0, upper=t-t0,
               t=t,
               t0=t0,
+              shift=shift,
               preonset_rate=preonset_rate,
               onset_sensitivity=onset_sensitivity,
               clinical_sensitivity=clinical_sensitivity,
@@ -150,6 +151,7 @@ prospective_sens_num <- function(t, t0,
               lower=0, upper=t-t0,
               t=t,
               t0=t0,
+              shift=shift,
               preonset_rate=preonset_rate,
               onset_sensitivity=onset_sensitivity,
               clinical_sensitivity=clinical_sensitivity,
@@ -184,6 +186,7 @@ prospective_sens_denom <- function(t, t0, preonset_rate, mean_sojourn_time, dist
 
 prospective_sens_analyt <- function(start_age,
                                     test_age,
+                                    shift,
                                     preonset_rate,
                                     mean_sojourn_time,
                                     onset_sensitivity,
@@ -196,6 +199,7 @@ prospective_sens_analyt <- function(start_age,
   
   numerator <- prospective_sens_num(t=test_age, 
                                     t0=start_age,
+                                    shift=shift,
                                     preonset_rate=preonset_rate,
                                     onset_sensitivity=onset_sensitivity, 
                                     clinical_sensitivity=clinical_sensitivity, 
@@ -217,6 +221,7 @@ prospective_sens_analyt <- function(start_age,
 
 prospective_sens_all_test_age_analyt <- function(test_age_range,
                                                  start_age,
+                                                 shift,
                                                 preonset_rate,
                                                 mean_sojourn_time,
                                                 onset_sensitivity,
@@ -229,6 +234,7 @@ prospective_sens_all_test_age_analyt <- function(test_age_range,
   overall_sensitivity <- integrate(Vectorize(prospective_sens_analyt),
             lower=test_age_range[1], upper=test_age_range[2],
             start_age = start_age,
+            shift = shift,
             preonset_rate = preonset_rate,
             mean_sojourn_time = mean_sojourn_time,
             onset_sensitivity = onset_sensitivity,

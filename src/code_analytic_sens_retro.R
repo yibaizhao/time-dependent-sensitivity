@@ -41,12 +41,12 @@ h_g <- function(s, t, u, t0, onset_sensitivity, clinical_sensitivity, mean_sojou
   return(h(t, s, u, t0, onset_sensitivity, clinical_sensitivity)*g(s, mean_sojourn_time))
 }
 
-f_integral_h_g <- function(u, t, t0, t_check, preonset_rate, onset_sensitivity, clinical_sensitivity, mean_sojourn_time, 
+f_integral_h_g <- function(u, t, t0, t_check, shift, preonset_rate, onset_sensitivity, clinical_sensitivity, mean_sojourn_time, 
                            dist, interval){
   tp <- t0+u # preclinical onset time
   f(u, preonset_rate, dist, interval)*
     integrate(Vectorize(h_g),
-              lower=t-tp, upper=t_check-tp,
+              lower=max(t-tp, shift), upper=t_check-tp,
               u=u,
               t=t,
               t0=t0,
@@ -55,7 +55,7 @@ f_integral_h_g <- function(u, t, t0, t_check, preonset_rate, onset_sensitivity, 
               mean_sojourn_time=mean_sojourn_time)$value
 }
 
-f_integral_g <- function(u, t, t0, t_check,
+f_integral_g <- function(u, t, t0, t_check, shift,
                        preonset_rate, mean_sojourn_time, 
                        dist, interval,
                        is_TRUE_positive = TRUE){
@@ -63,23 +63,24 @@ f_integral_g <- function(u, t, t0, t_check,
   if(is_TRUE_positive){
     f(u, preonset_rate, dist, interval)*
       integrate(Vectorize(g),
-                lower = t-tp, upper = t_check-tp,
+                lower = max(t-tp, shift), upper = t_check-tp,
                 mean_sojourn_time = mean_sojourn_time)$value
   }else{
     f(u, preonset_rate, dist, interval)*
       integrate(Vectorize(g),
-                lower = 0, upper = t_check-tp,
+                lower = shift, upper = t_check-tp,
                 mean_sojourn_time = mean_sojourn_time)$value
   }
 }
 
-integral_f_h_g <- function(t, t0, t_check, preonset_rate, onset_sensitivity, clinical_sensitivity, mean_sojourn_time,
+integral_f_h_g <- function(t, t0, t_check, shift, preonset_rate, onset_sensitivity, clinical_sensitivity, mean_sojourn_time,
                            dist, interval){
   integrate(Vectorize(f_integral_h_g),
             lower = 0, upper = t-t0,
             t = t,
             t0 = t0, 
             t_check = t_check, 
+            shift = shift, 
             preonset_rate = preonset_rate, 
             onset_sensitivity = onset_sensitivity, 
             clinical_sensitivity = clinical_sensitivity,
@@ -88,7 +89,7 @@ integral_f_h_g <- function(t, t0, t_check, preonset_rate, onset_sensitivity, cli
             interval = interval)$value
 }
 
-integral_f_g <- function(t, t0, t_check,
+integral_f_g <- function(t, t0, t_check, shift,
                          preonset_rate, mean_sojourn_time,
                          dist, interval,
                          is_TRUE_positive = TRUE){
@@ -98,6 +99,7 @@ integral_f_g <- function(t, t0, t_check,
               t = t,
               t0 = t0, 
               t_check = t_check, 
+              shift = shift, 
               preonset_rate = preonset_rate, 
               mean_sojourn_time = mean_sojourn_time,
               dist = dist, 
@@ -109,6 +111,7 @@ integral_f_g <- function(t, t0, t_check,
               t = t,
               t0 = t0, 
               t_check = t_check, 
+              shift = shift, 
               preonset_rate = preonset_rate, 
               mean_sojourn_time = mean_sojourn_time,
               dist = dist, 
@@ -119,7 +122,7 @@ integral_f_g <- function(t, t0, t_check,
 }
 
 
-analytic_retrospective_sens <- function(t, t0, follow_up_year,
+analytic_retrospective_sens <- function(t, t0, shift, follow_up_year,
                                         preonset_rate,
                                         onset_sensitivity,
                                         clinical_sensitivity,
@@ -127,32 +130,34 @@ analytic_retrospective_sens <- function(t, t0, follow_up_year,
                                         dist, interval,
                                         specificity = 1){
   t_check <- t + follow_up_year
-  numerator_TRUE_positive <- integral_f_h_g(t, t0, t_check,
+  numerator_TRUE_positive <- integral_f_h_g(t, t0, t_check, shift,
                                           preonset_rate, 
                                           onset_sensitivity, 
                                           clinical_sensitivity,
                                           mean_sojourn_time,
                                           dist, interval)
   numerator_FALSE_positive <- (1 - specificity) *
-    integral_f_g(t, t0, t_check,
+    integral_f_g(t, t0, t_check, shift,
                  preonset_rate, mean_sojourn_time,
                  dist, interval,
                  is_TRUE_positive = FALSE)
+  numerator_FALSE_positive <- max(numerator_FALSE_positive, 0)
   
-  denominator_TRUE_positive <- integral_f_g(t, t0, t_check,
+  denominator_TRUE_positive <- integral_f_g(t, t0, t_check, shift,
                                             preonset_rate, mean_sojourn_time,
                                             dist, interval,
                                             is_TRUE_positive = TRUE)
-  denominator_FALSE_positive <- integral_f_g(t, t0, t_check,
+  denominator_FALSE_positive <- integral_f_g(t, t0, t_check, shift,
                                             preonset_rate, mean_sojourn_time,
                                             dist, interval,
                                             is_TRUE_positive = FALSE)
+  denominator_FALSE_positive <- max(denominator_FALSE_positive, 0)
   
   return((numerator_TRUE_positive + numerator_FALSE_positive) / (denominator_TRUE_positive + denominator_FALSE_positive))
 }
 
 analytic_retrospective_sens_all_test_age <- function(test_age_range,
-                                                     t0, follow_up_year,
+                                                     t0, shift, follow_up_year,
                                                      preonset_rate,
                                                      onset_sensitivity,
                                                      clinical_sensitivity,
@@ -163,6 +168,7 @@ analytic_retrospective_sens_all_test_age <- function(test_age_range,
   overall_sensitivity <- integrate(Vectorize(analytic_retrospective_sens),
                                    lower=test_age_range[1], upper=test_age_range[2],
                                    t0 = t0, 
+                                   shift = shift, 
                                    follow_up_year = follow_up_year,
                                    preonset_rate = preonset_rate,
                                    onset_sensitivity = onset_sensitivity,
